@@ -23,8 +23,9 @@ Add \`--project <name>\` in a monorepo when more than one project is detected. D
 or local Ollama is available, triage runs automatically and marks findings confirmed or
 refuted; otherwise every finding carries only its pattern confidence.
 
-The scan writes \`.tripwire/FIX_PLAN.md\`. Read it — it holds one task per finding with
-acceptance criteria already written.
+The scan prints the path to a generated \`FIX_PLAN.md\`. Read that file — it holds one task
+per finding with acceptance criteria already written. It is stored outside the repository,
+so nothing is added to the working tree.
 
 ## 2. Order the work
 

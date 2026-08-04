@@ -125,14 +125,19 @@ Files the deterministic pass flagged as containing a credential are never sent t
 
 ## What it produces
 
-Alongside the terminal scorecard, each scan writes four artifacts to `.tripwire/`:
+Nothing is written into your repository. The terminal output is the primary read; artifacts
+land in a cache directory outside the tree, and the scan prints the path:
 
-| File | Purpose |
-| --- | --- |
-| `FIX_PLAN.md` | **The one to hand an agent.** One task per finding, ordered by severity, each with its own acceptance criteria. |
-| `report.md` | The human read: findings, evidence, triage notes, and an explicit list of what was not covered. |
-| `findings.json` | Machine-readable, including refuted findings and their reasons. |
-| `tripwire.sarif` | SARIF 2.1.0 for GitHub code scanning. |
+| File | When | Purpose |
+| --- | --- | --- |
+| `FIX_PLAN.md` | always | **The one to hand an agent.** One task per finding, ordered by severity, each with its own acceptance criteria. |
+| `findings.json` | always | Machine-readable, including refuted findings and their reasons. |
+| `report.md` | `--out` | The long-form human read: evidence, triage notes, and what was not covered. |
+| `tripwire.sarif` | `--out` | SARIF 2.1.0 for GitHub code scanning. |
+
+Two files by default, because only two get read — the terminal already covers what
+`report.md` says, and SARIF matters only to a CI uploader. `--out DIR` writes all four
+wherever you point it, and is the only way anything lands inside the repository.
 
 `FIX_PLAN.md` is written to be pasted into a coding agent and worked top to bottom. It opens with a protocol that closes the loopholes an agent reaches for under pressure — no suppression comments, no scanner-dodging renames, no blanket refactors, and no marking a credential fixed when only the line was deleted and the key was never rotated. Every task states what must be true when it is done:
 
@@ -203,7 +208,8 @@ tripwire providers          List model providers for the triage layer.
   --skip ID|CATEGORY        Skip these rules or categories (repeatable).
   --all                     Show every finding in the terminal, not a summary.
   --fail-on LEVEL           Exit non-zero at critical|high|medium|low.
-  --out DIR                 Where to write artifacts. Default: <project>/.tripwire
+  --out DIR                 Also write report.md and SARIF here. Default: a cache
+                            directory outside the repository.
   --json                    Print findings as JSON and write no files.
   --provider NAME           anthropic | openai | ollama.
   --model NAME              Model id.

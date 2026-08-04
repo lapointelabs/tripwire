@@ -8,7 +8,7 @@ import { filterToChanged } from "../src/git.js";
 import { PLAYBOOK } from "../src/playbook.js";
 import { allRules } from "../src/rules/index.js";
 import { detectHarnesses, HARNESSES, installSkills } from "../src/skills.js";
-import { createPalette } from "../src/util.js";
+import { artifactDirFor, createPalette } from "../src/util.js";
 
 const scratch = [];
 after(async () => {
@@ -109,6 +109,37 @@ describe("skill installation", () => {
     const forced = await installSkills(root, ["claude"], { force: true });
     assert.equal(forced[0].status, "written");
     assert.doesNotMatch(await readFile(target, "utf8"), /My own notes/);
+  });
+});
+
+describe("artifact location", () => {
+  test("resolves outside the project, so scans never dirty the working tree", async () => {
+    const root = await workspace();
+    const target = artifactDirFor(path.join(root, "services", "api"));
+    assert.ok(!target.startsWith(root), "artifacts must not land inside the scanned project");
+    assert.match(target, /tripwire/);
+  });
+
+  test("is stable for a project and distinct between projects", () => {
+    const first = artifactDirFor("/repos/alpha");
+    const second = artifactDirFor("/repos/beta");
+    assert.equal(first, artifactDirFor("/repos/alpha"), "re-reading the last plan must find it");
+    assert.notEqual(first, second, "two projects must not overwrite each other");
+  });
+
+  test("keeps same-named projects in different locations apart", () => {
+    assert.notEqual(artifactDirFor("/a/api"), artifactDirFor("/b/api"));
+  });
+
+  test("honours XDG_CACHE_HOME", () => {
+    const original = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = "/tmp/xdg-test";
+    try {
+      assert.match(artifactDirFor("/repos/alpha"), /^\/tmp\/xdg-test\/tripwire\//);
+    } finally {
+      if (original === undefined) delete process.env.XDG_CACHE_HOME;
+      else process.env.XDG_CACHE_HOME = original;
+    }
   });
 });
 

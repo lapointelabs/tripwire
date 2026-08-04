@@ -14,7 +14,7 @@ import { renderTerminalReport } from "./report/terminal.js";
 import { allRules, CATEGORIES, SEVERITIES } from "./rules/index.js";
 import { scanProject } from "./scan.js";
 import { scoreProject } from "./score.js";
-import { createPalette, flag, flagList, parseArgs, readJson, REPORT_DIR } from "./util.js";
+import { artifactDirFor, createPalette, flag, flagList, parseArgs, readJson } from "./util.js";
 import { VERSION } from "./version.js";
 
 const HELP = `tripwire ${VERSION} — find what hurts your users and misleads your agents
@@ -37,7 +37,8 @@ Scan options:
   --skip ID|CATEGORY        Skip these rules or categories (repeatable).
   --all                     Show every finding in the terminal, not a summary.
   --fail-on LEVEL           Exit non-zero at critical|high|medium|low. Default: never.
-  --out DIR                 Where to write artifacts. Default: <project>/${REPORT_DIR}
+  --out DIR                 Also write report.md and SARIF here. Default: a cache
+                            directory outside the repository.
   --json                    Print findings as JSON to stdout and write no files.
   --no-color                Disable colored output.
 
@@ -307,8 +308,10 @@ async function commandScan(root, flags) {
     write(renderTerminalReport(result, palette, { all: Boolean(flags.all) }));
     const written = await writeArtifacts(result, meta, flags);
     const plan = written.files[0];
-    // A cache path is only useful in full; a path inside the repo reads better relative.
-    const shown = written.inRepo ? path.relative(process.cwd(), plan) : plan;
+    // Relative only when it actually reads better — a path that climbs out of the working
+    // directory with `../../..` is worse than the absolute one.
+    const relative = path.relative(process.cwd(), plan);
+    const shown = relative.startsWith("..") ? plan : relative;
 
     if (result.summary.total) {
       write(`  ${palette.cyan("Fix plan")} ${palette.blue(shown)}`);
