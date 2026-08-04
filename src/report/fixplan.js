@@ -169,6 +169,17 @@ export function acceptanceCriteria(finding, group) {
       `The literal value is gone from the working tree and loaded from the environment or a secret manager instead.`,
       `The file holding it is covered by \`.gitignore\` if it is a local config file.`
     ],
+    "supply-chain/no-lockfile": [
+      `A lockfile is committed, and CI installs with the frozen flag so a drifted lockfile fails the build rather than being rewritten.`
+    ],
+    "supply-chain/unpinned-ci-action": [
+      `Every third-party action is pinned to a full commit SHA, with the version in a trailing comment.`,
+      `Something keeps those SHAs current — a bot or a scheduled review — so pinning does not become stale-by-default.`
+    ],
+    "supply-chain/untrusted-registry": [
+      `Every registry URL is HTTPS and certificate verification is enabled.`,
+      `Any private certificate authority is trusted explicitly rather than by disabling the check.`
+    ],
     "taint/request-reaches-execution-sink": [
       `The entry point validates the value against an allow-list — a strict pattern, a resolved host, or a fixed set — and rejects anything else, before it is passed on.`,
       `The sink no longer goes through a shell: arguments are passed as an array so no interpreter parses them.`,

@@ -18,6 +18,10 @@ directly. Do not commit, do not push, and do not open a pull request unless the 
 npx @lapointelabs/tripwire@latest scan --scope changed
 \`\`\`
 
+Add \`--audit\` to also run the ecosystem's vulnerability auditor (npm, pnpm, dotnet,
+pip-audit) and fold known advisories into the same report. It spawns a subprocess and
+uses the network, so it is opt-in.
+
 Add \`--project <name>\` in a monorepo when more than one project is detected. Drop
 \`--scope changed\` for a full-codebase pass. If an \`ANTHROPIC_API_KEY\`, \`OPENAI_API_KEY\`,
 or local Ollama is available, triage runs automatically and marks findings confirmed or

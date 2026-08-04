@@ -44,7 +44,7 @@ export function renderReportMarkdown(result, meta) {
 
   out.push(`## What this scan did not cover`);
   out.push("");
-  out.push(readCoverage(capabilities, gatedRules, ai));
+  out.push(readCoverage(capabilities, gatedRules, ai, result.audit));
   out.push("");
 
   if (!groups.length) {
@@ -100,8 +100,15 @@ export function renderReportMarkdown(result, meta) {
   return `${out.join("\n")}\n`;
 }
 
-function readCoverage(capabilities, gatedRules, ai) {
+function readCoverage(capabilities, gatedRules, ai, audit) {
   const notes = [];
+  if (audit?.ran) {
+    notes.push(`- **${audit.tool} reported ${audit.total} vulnerable ${audit.total === 1 ? "dependency" : "dependencies"}.**${audit.truncated ? ` ${audit.truncated} beyond the reporting limit are not listed.` : ""}`);
+  } else if (audit) {
+    notes.push(`- **The dependency audit did not run:** ${audit.reason}. Known-vulnerable dependencies were not checked.`);
+  } else {
+    notes.push(`- **Dependency vulnerabilities were not checked.** Re-run with \`--audit\` to invoke the ecosystem auditor.`);
+  }
   if (gatedRules.length) {
     const byReason = new Map();
     for (const rule of gatedRules) {

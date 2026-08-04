@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { listProviders, resolveProvider, triageFindings } from "./ai.js";
+import { auditProject, VULNERABLE_DEPENDENCY_RULE } from "./audit.js";
 import { detectProjects, groupByStack } from "./detect.js";
 import { explainRule, findRule } from "./explain.js";
 import { changedFiles, filterToChanged, resolveBase } from "./git.js";
@@ -40,6 +41,9 @@ Scan options:
   --out DIR                 Also write report.md and SARIF here. Default: a cache
                             directory outside the repository.
   --json                    Print findings as JSON to stdout and write no files.
+  --audit                   Also run the ecosystem's vulnerability auditor
+                            (npm/pnpm/yarn audit, dotnet, pip-audit) and include
+                            its results. Spawns a subprocess and uses the network.
   --no-color                Disable colored output.
 
 Skill options:
@@ -283,6 +287,33 @@ async function commandScan(root, flags) {
       result.findings = filterToChanged(result.findings, changed.files, project.relative);
       result.scope = { mode: "changed", base: changed.base.reason, files: changed.files.size };
     }
+    if (flags.audit) {
+      if (!quiet) process.stderr.write(`${palette.dim(`auditing ${project.relative}…`)}\r`);
+      result.audit = await auditProject(project, { root });
+      for (const item of result.audit.findings) {
+        result.findings.push({
+          id: `${VULNERABLE_DEPENDENCY_RULE.id}:${item.file}:${item.evidence}`,
+          ruleId: VULNERABLE_DEPENDENCY_RULE.id,
+          category: VULNERABLE_DEPENDENCY_RULE.category,
+          severity: item.severity,
+          title: VULNERABLE_DEPENDENCY_RULE.title,
+          why: VULNERABLE_DEPENDENCY_RULE.why,
+          fix: VULNERABLE_DEPENDENCY_RULE.fix,
+          file: item.file,
+          line: item.line,
+          endLine: item.line,
+          evidence: item.evidence,
+          message: item.message,
+          confidence: item.confidence,
+          // An advisory is authoritative; sending it to a model to second-guess wastes
+          // tokens on a question the ecosystem already answered.
+          aiTriage: false,
+          verdict: null
+        });
+      }
+      if (!quiet) process.stderr.write(`${" ".repeat(60)}\r`);
+    }
+
     result.summary = scoreProject(result.findings, result.stats);
     result.ai = await runTriage(result, flags, root, palette);
     // Triage can refute findings, which changes the score — recompute after it runs.

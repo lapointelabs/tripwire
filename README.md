@@ -155,6 +155,39 @@ sends larger batches at lower concurrency and allows minutes rather than seconds
 
 Files the deterministic pass flagged as containing a credential are never sent to any model.
 
+## Dependency vulnerabilities
+
+Tripwire does not ship an advisory database. Instead `--audit` runs the auditor your
+ecosystem already maintains and folds its results into the same report and fix plan:
+
+```sh
+npx @lapointelabs/tripwire@latest scan --audit
+```
+
+| Ecosystem | Command run | Needs installing |
+| --- | --- | --- |
+| npm / pnpm / yarn | `npm audit`, `pnpm audit`, `yarn npm audit` — chosen by lockfile | ships with the manager |
+| .NET | `dotnet list package --vulnerable --include-transitive` | ships with the SDK |
+| Python | `pip-audit` | `pip install pip-audit` |
+| Go | `govulncheck -json ./...` | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| Rust | `cargo audit --json` | `cargo install cargo-audit` |
+
+**govulncheck findings carry reachability.** A vulnerable function you never call is
+reported at low severity and labelled as such, while one your code actually reaches is
+high — the distinction is the reason to run it rather than diff a lockfile. Rust
+advisories are reported at high, and `cargo audit`'s informational warnings
+(unmaintained, unsound) at low, so a crate that merely stopped being updated does not
+drown the real advisory.
+
+A missing auditor names the command that installs it, including when the binary exists
+but the subcommand does not (`cargo` without `cargo-audit`).
+
+It is opt-in because it is the only part of a scan that spawns a subprocess and reaches
+the network — a scanner that quietly makes network calls cannot be run on an air-gapped
+build agent. When it has not run, the report says so rather than leaving a clean-looking
+silence. A missing tool, an unrestored .NET project, or an offline registry degrades to a
+stated reason and never fails the scan.
+
 ## What it produces
 
 Nothing is written into your repository. The terminal output is the primary read; artifacts
@@ -194,6 +227,8 @@ Marking a task `[~] not applicable` with a reason is an explicitly correct outco
 **Security** — SQL, command, and NoSQL injection; runtime code evaluation and unsafe deserialization; path traversal; raw HTML sinks; permissive CORS; disabled TLS verification; fast hashes on credentials; predictable randomness for secrets; unvalidated redirects; committed credentials across fourteen vendor token formats.
 
 **Agent safety** — external data spliced into prompts without a data/instruction boundary; model output reaching a shell, query, or filesystem; tool descriptions assembled at runtime; disabled agent permission gates; secrets interpolated into prompt text; instruction-override phrasing committed into source or into a `CLAUDE.md`; doc blocks that disagree with their signature; comments contradicting the code beneath them; instruction files referencing paths and npm scripts that do not exist.
+
+**Supply chain** — missing or uncommitted lockfiles; dependencies pinned to `*`/`latest` or to a movable git ref; unrestricted dependency install scripts; registries reached over plain HTTP or with certificate checks disabled; CI actions pinned to mutable tags rather than commit SHAs; NuGet feeds without package source mapping; unpinned Python requirements and `--extra-index-url` dependency-confusion exposure.
 
 **Correctness, maintainability, performance** — silently discarded errors; monolith files; oversized functions; deep nesting; long parameter lists; unused exports; cross-file duplication; sequential awaits and linear lookups inside loops.
 

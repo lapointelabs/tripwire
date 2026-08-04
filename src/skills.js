@@ -177,6 +177,7 @@ that dodges the pattern.
 | \`${tw} scan\` | Full scan |
 | \`${tw} scan --score\` | Numeric score only |
 | \`${tw} scan --fail-on high\` | Exit non-zero at or above a severity (CI) |
+| \`${tw} scan --audit\` | Also run npm/pnpm/dotnet/pip vulnerability auditors |
 | \`${tw} explain <rule-id>\` | Rule detail and its false positives |
 | \`${tw} list\` | Detected projects, grouped by stack |
 

@@ -46,6 +46,15 @@ export function renderTerminalReport(result, palette, options = {}) {
     lines.push(palette.dim(`  Reporting only the ${result.scope.files} changed ${pluralize(result.scope.files, "file")} (${result.scope.base}). The whole project was analysed; findings elsewhere are not shown.`));
   }
 
+  if (result.audit?.ran) {
+    const total = result.audit.total;
+    lines.push(palette.dim(`  ${result.audit.tool}: ${total} vulnerable ${pluralize(total, "dependency", "dependencies")}${result.audit.truncated ? `, ${result.audit.truncated} beyond the reporting limit` : ""}`));
+  } else if (result.audit) {
+    lines.push(palette.yellow(`  Dependency audit did not run: ${result.audit.reason}`));
+  } else {
+    lines.push(palette.dim("  Dependency vulnerabilities were not checked — add --audit to run the ecosystem auditor."));
+  }
+
   if (ai?.used) {
     const detail = ai.reviewed
       ? `${ai.label} (${ai.model}) reviewed ${ai.reviewed} uncertain ${pluralize(ai.reviewed, "finding")}, refuting ${summary.refuted}`

@@ -83,6 +83,26 @@ const FALSE_POSITIVES = {
   "structure/silenced-error": [
     "A catch that is genuinely best-effort and documented as such in wording Tripwire does not recognize."
   ],
+  "supply-chain/no-lockfile": [
+    "A library whose lockfile is deliberately not committed so consumers resolve their own tree. The reproducibility cost is real; the decision may still be right.",
+    "A fixture or example package that is never installed."
+  ],
+  "supply-chain/install-scripts-unrestricted": [
+    "A policy declared somewhere Tripwire does not read — a global .npmrc, a CI flag, or an organisation-level setting rather than the project."
+  ],
+  "supply-chain/unpinned-ci-action": [
+    "An action published from the same organisation, governed by the same review process as the code it builds.",
+    "A workflow that handles no secrets and produces no artifact, where a compromised action gains nothing."
+  ],
+  "supply-chain/nuget-dependency-confusion": [
+    "Feeds that are all internal mirrors of one another, where no name is resolvable from an untrusted source."
+  ],
+  "supply-chain/python-unpinned-requirements": [
+    "An input file intended to be loose, with the pinned output compiled elsewhere. Tripwire reads requirements.txt as the installed set and cannot tell which role it plays."
+  ],
+  "supply-chain/mutable-dependency-reference": [
+    "A reference to a repository you control, where a moved tag is your own change rather than a third party’."
+  ],
   "taint/request-reaches-execution-sink": [
     "A method name that collides across files, since the join resolves a receiver by file name and a bare call by method name rather than by type. Check that the file named in the message is the one actually called.",
     "A value validated between the entry point and the sink — by a helper, an attribute, or a framework filter — which a one-hop join does not follow.",

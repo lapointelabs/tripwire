@@ -177,7 +177,7 @@ export async function walkSourceFiles(root, options = {}) {
 export function parseArgs(args) {
   const booleanFlags = new Set([
     "help", "version", "json", "yes", "no-ai", "ai", "quiet", "verbose", "list", "all",
-    "no-color", "score", "force"
+    "no-color", "score", "force", "audit"
   ]);
   const positionals = [];
   const flags = {};
