@@ -1,0 +1,47 @@
+{
+  "name": "@lapointelabs/tripwire",
+  "version": "0.1.0",
+  "description": "Security and agent-safety scanner. Finds injection sinks, prompt-injection surfaces, misleading comments that misdirect AI agents, and structural rot — then writes a fix plan an agent can execute.",
+  "type": "module",
+  "bin": {
+    "tripwire": "bin/tripwire.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check bin/tripwire.js",
+    "release:check": "npm test && npm publish --dry-run --ignore-scripts"
+  },
+  "engines": {
+    "node": ">=20.1"
+  },
+  "keywords": [
+    "security",
+    "sast",
+    "static-analysis",
+    "prompt-injection",
+    "sql-injection",
+    "code-scanning",
+    "agents",
+    "claude",
+    "monorepo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lapointelabs/tripwire.git"
+  },
+  "homepage": "https://github.com/lapointelabs/tripwire#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "license": "MIT"
+}

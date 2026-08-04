@@ -1,0 +1,11 @@
+{
+  "name": "vulnerable-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "express": "^4.19.0",
+    "pg": "^8.11.0"
+  }
+}
