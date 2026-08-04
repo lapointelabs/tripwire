@@ -6,43 +6,51 @@
  * and it answers the judgment-shaped questions (does this comment actually contradict
  * the code? is this interpolated value genuinely attacker-influenced?).
  *
- * Raw HTTP rather than a vendor SDK is deliberate: the whole point is that the user
- * chooses the provider, and Tripwire ships with no runtime dependencies. Requests carry
- * only the finding's evidence line plus a small window of surrounding source — never the
- * whole repository, and never a file the deterministic pass flagged as holding a secret.
+ * Every provider goes through its vendor's official SDK rather than hand-rolled HTTP.
+ * Model APIs drift — parameters get removed, auth changes, new stop reasons appear — and
+ * an SDK absorbs that in a version bump instead of a silent breakage this project has to
+ * notice and chase. The SDKs also own retry, backoff, and timeout handling, which is a
+ * meaningful amount of subtle code not worth reimplementing per provider.
+ *
+ * SDKs are imported lazily, so a scan that never triages (the default without a key, and
+ * every `--no-ai` run) pays none of the load cost.
+ *
+ * Requests carry only a finding's evidence line plus a small window of surrounding
+ * source — never the whole repository, and never a file the deterministic pass flagged
+ * as holding a secret.
  */
+
+const REQUEST_TIMEOUT_MS = 120_000;
+const MAX_RETRIES = 2;
 
 const PROVIDERS = {
   anthropic: {
     label: "Anthropic",
     envKeys: ["ANTHROPIC_API_KEY"],
     defaultModel: "claude-opus-5",
-    defaultBaseUrl: "https://api.anthropic.com",
-    build(request, config) {
-      return {
-        url: `${config.baseUrl}/v1/messages`,
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": config.apiKey,
-          "anthropic-version": "2023-06-01"
-        },
-        // No temperature/top_p/top_k: those parameters are rejected outright on the
-        // current Opus and Sonnet models, and this task wants determinism anyway.
-        body: {
-          model: config.model,
-          max_tokens: 8000,
-          system: request.system,
-          messages: [{ role: "user", content: request.user }]
-        }
-      };
+    package: "@anthropic-ai/sdk",
+    async createClient(config) {
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      return new Anthropic({
+        apiKey: config.apiKey,
+        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+        maxRetries: MAX_RETRIES,
+        timeout: REQUEST_TIMEOUT_MS
+      });
     },
-    parse(payload) {
-      if (payload.stop_reason === "refusal") {
-        // A refusal is a decision about this exact payload, not a transient fault —
-        // retrying it just spends the same money to be declined again.
-        throw permanent(new Error(`model declined the request (${payload.stop_details?.category || "unspecified"})`));
+    async complete(client, request, config) {
+      // No temperature/top_p/top_k: those parameters are rejected outright on current
+      // Opus and Sonnet models, and this task wants determinism anyway.
+      const response = await client.messages.create({
+        model: config.model,
+        max_tokens: 8000,
+        system: request.system,
+        messages: [{ role: "user", content: request.user }]
+      });
+      if (response.stop_reason === "refusal") {
+        throw new Error(`model declined the request (${response.stop_details?.category || "unspecified"})`);
       }
-      const text = (payload.content || [])
+      const text = (response.content || [])
         .filter((block) => block.type === "text")
         .map((block) => block.text)
         .join("");
@@ -55,28 +63,62 @@ const PROVIDERS = {
     label: "OpenAI-compatible",
     envKeys: ["OPENAI_API_KEY"],
     defaultModel: "gpt-4o",
-    defaultBaseUrl: "https://api.openai.com",
-    build(request, config) {
-      return {
-        url: `${config.baseUrl}/v1/chat/completions`,
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${config.apiKey}`
-        },
-        body: {
-          model: config.model,
-          messages: [
-            { role: "system", content: request.system },
-            { role: "user", content: request.user }
-          ],
-          response_format: { type: "json_object" }
-        }
-      };
+    package: "openai",
+    async createClient(config) {
+      const { default: OpenAI } = await import("openai");
+      return new OpenAI({
+        apiKey: config.apiKey,
+        ...(config.baseUrl ? { baseURL: `${config.baseUrl}/v1` } : {}),
+        maxRetries: MAX_RETRIES,
+        timeout: REQUEST_TIMEOUT_MS
+      });
     },
-    parse(payload) {
-      const text = payload.choices?.[0]?.message?.content;
+    async complete(client, request, config) {
+      const response = await client.chat.completions.create({
+        model: config.model,
+        messages: [
+          { role: "system", content: request.system },
+          { role: "user", content: request.user }
+        ],
+        response_format: { type: "json_object" }
+      });
+      const text = response.choices?.[0]?.message?.content;
       if (!text) throw new Error("empty response from model");
       return text;
+    }
+  },
+
+  /**
+   * Cursor exposes agents, not completions — there is no chat endpoint to post a prompt
+   * to. `Agent.prompt` is the SDK's one-shot form: send a prompt, get a result, exit.
+   *
+   * The `local` runtime option is deliberately not set. It would give the agent the
+   * working directory, and triage does not need repository access — the excerpts are
+   * already in the prompt. Nothing is cloned, no branch is created, no pull request is
+   * opened. Agent runs are heavier than a chat call, so batches are larger and run at
+   * lower concurrency.
+   */
+  cursor: {
+    label: "Cursor",
+    envKeys: ["CURSOR_API_KEY"],
+    defaultModel: "composer-2.5",
+    package: "@cursor/sdk",
+    batchSize: 12,
+    concurrency: 2,
+    async createClient() {
+      const { Agent } = await import("@cursor/sdk");
+      return { Agent };
+    },
+    async complete(client, request, config) {
+      const run = await client.Agent.prompt(`${request.system}\n\n---\n\n${request.user}`, {
+        apiKey: config.apiKey,
+        model: { id: config.model }
+      });
+      if (run.status && run.status !== "FINISHED") {
+        throw new Error(`Cursor run ended as ${run.status}`);
+      }
+      if (!run.result) throw new Error("Cursor run finished with no result text");
+      return run.result;
     }
   },
 
@@ -84,24 +126,22 @@ const PROVIDERS = {
     label: "Ollama (local)",
     envKeys: [],
     defaultModel: "qwen2.5-coder",
-    defaultBaseUrl: process.env.OLLAMA_HOST || "http://127.0.0.1:11434",
-    build(request, config) {
-      return {
-        url: `${config.baseUrl}/api/chat`,
-        headers: { "content-type": "application/json" },
-        body: {
-          model: config.model,
-          stream: false,
-          format: "json",
-          messages: [
-            { role: "system", content: request.system },
-            { role: "user", content: request.user }
-          ]
-        }
-      };
+    package: "ollama",
+    async createClient(config) {
+      const { Ollama } = await import("ollama");
+      return new Ollama({ host: config.baseUrl || process.env.OLLAMA_HOST || "http://127.0.0.1:11434" });
     },
-    parse(payload) {
-      const text = payload.message?.content;
+    async complete(client, request, config) {
+      const response = await client.chat({
+        model: config.model,
+        stream: false,
+        format: "json",
+        messages: [
+          { role: "system", content: request.system },
+          { role: "user", content: request.user }
+        ]
+      });
+      const text = response.message?.content;
       if (!text) throw new Error("empty response from model");
       return text;
     }
@@ -113,6 +153,7 @@ export function listProviders() {
     id,
     label: provider.label,
     defaultModel: provider.defaultModel,
+    package: provider.package,
     envKeys: provider.envKeys
   }));
 }
@@ -128,7 +169,8 @@ export function resolveProvider({ provider, model, apiKey, baseUrl }) {
     chosen = Object.keys(PROVIDERS).find((id) => PROVIDERS[id].envKeys.some((key) => process.env[key]));
   }
   if (!chosen) {
-    return { available: false, reason: "no API key found in the environment (set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --provider ollama)" };
+    const names = [...new Set(Object.values(PROVIDERS).flatMap((entry) => entry.envKeys))];
+    return { available: false, reason: `no API key found in the environment (set one of ${names.join(", ")}, or pass --provider ollama)` };
   }
   const definition = PROVIDERS[chosen];
   if (!definition) {
@@ -146,55 +188,27 @@ export function resolveProvider({ provider, model, apiKey, baseUrl }) {
     config: {
       model: model || definition.defaultModel,
       apiKey: key,
-      baseUrl: (baseUrl || definition.defaultBaseUrl).replace(/\/+$/, "")
+      baseUrl: baseUrl ? String(baseUrl).replace(/\/+$/, "") : null
     }
   };
 }
 
-async function callModel(resolved, request, { timeoutMs = 120_000, retries = 2 } = {}) {
-  const { definition, config } = resolved;
-  const { url, headers, body } = definition.build(request, config);
-
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-      if (!response.ok) {
-        const detail = (await response.text()).slice(0, 300);
-        const retryable = response.status === 429 || response.status >= 500;
-        const error = new Error(`${response.status} ${detail}`);
-        if (!retryable || attempt === retries) throw error;
-        lastError = error;
-        await delay(1000 * 2 ** attempt);
-        continue;
-      }
-      return definition.parse(await response.json());
-    } catch (error) {
-      lastError = error;
-      if (error.permanent || error.name === "AbortError" || attempt === retries) break;
-      await delay(1000 * 2 ** attempt);
-    } finally {
-      clearTimeout(timer);
+/**
+ * Build the provider's client once per scan.
+ *
+ * A missing SDK is reported as a plain instruction rather than a module-resolution stack
+ * trace: these are declared dependencies, so the realistic cause is an install that
+ * skipped them, and the fix is one command.
+ */
+async function openClient(resolved) {
+  try {
+    return await resolved.definition.createClient(resolved.config);
+  } catch (error) {
+    if (error?.code === "ERR_MODULE_NOT_FOUND" || /Cannot find (module|package)/i.test(error?.message || "")) {
+      throw new Error(`${resolved.label} needs the "${resolved.definition.package}" package. Install it with: npm install ${resolved.definition.package}`);
     }
+    throw error;
   }
-  throw lastError || new Error("model request failed");
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Mark an error as not worth retrying — the same request would fail the same way. */
-function permanent(error) {
-  error.permanent = true;
-  return error;
 }
 
 /** Models wrap JSON in prose or fences often enough that this is worth handling. */
@@ -238,12 +252,24 @@ function buildWindow(finding, fileText) {
  * Send low-confidence findings to the model in small batches and fold the verdicts back
  * in. Findings the deterministic pass is already certain about are never sent — that
  * keeps the cost proportional to the ambiguity, not to the repository size.
+ *
+ * There is no retry loop here on purpose: the SDKs retry transport failures themselves,
+ * and the failures that reach this point (a refusal, a malformed reply) would fail the
+ * same way on a second attempt. A failed batch records an error and leaves its findings
+ * untouched, so a triage problem can never silently downgrade a real finding.
  */
 export async function triageFindings(findings, options) {
-  const { resolved, readFile, batchSize = 6, concurrency = 3, onProgress = () => {}, budget = 250 } = options;
+  const { resolved, readFile, onProgress = () => {}, budget = 250 } = options;
+  // Agent-backed providers pay a fixed startup cost per call, so they want fewer, larger
+  // batches; chat endpoints are the opposite. Each provider states its own preference.
+  const batchSize = options.batchSize || resolved.definition.batchSize || 6;
+  const concurrency = options.concurrency || resolved.definition.concurrency || 3;
 
   const candidates = findings.filter((finding) => finding.aiTriage && finding.confidence !== "high");
   if (!candidates.length) return { reviewed: 0, changed: 0, skipped: findings.length, errors: [] };
+
+  // Injectable for tests; in normal use this constructs the vendor SDK client.
+  const client = options.client || await openClient(resolved);
 
   const selected = candidates.slice(0, budget);
   const batches = [];
@@ -276,20 +302,12 @@ export async function triageFindings(findings, options) {
         ].join("\n"));
       }
 
-      let raw;
-      try {
-        raw = await callModel(resolved, {
-          system: TRIAGE_SYSTEM,
-          user: `Review ${batch.length} candidate${batch.length === 1 ? "" : "s"}.\n\n${blocks.join("\n\n")}`
-        });
-      } catch (error) {
-        errors.push(`batch ${index + 1}: ${error.message}`);
-        onProgress({ kind: "batch", index: index + 1, total: batches.length, failed: true });
-        continue;
-      }
-
       let parsed;
       try {
+        const raw = await resolved.definition.complete(client, {
+          system: TRIAGE_SYSTEM,
+          user: `Review ${batch.length} candidate${batch.length === 1 ? "" : "s"}.\n\n${blocks.join("\n\n")}`
+        }, resolved.config);
         parsed = parseJson(raw);
       } catch (error) {
         errors.push(`batch ${index + 1}: ${error.message}`);

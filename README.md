@@ -4,7 +4,7 @@ Tripwire scans a codebase for the things that hurt your users and the things tha
 
 It finds injection sinks, committed credentials, and unsafe web defaults — the usual scanner territory. It also finds a category most scanners have no concept of: **the ways a repository lies to the model reading it.** Prompt-injection surfaces, model output flowing into a shell, tool descriptions assembled from runtime data, doc blocks that disagree with their function signature, and `CLAUDE.md` files pointing at scripts that no longer exist.
 
-Created by [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. No runtime dependencies beyond Node.js 20.1+.
+Created by [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. Requires Node.js 20.1+.
 
 ## Quick start
 
@@ -119,7 +119,39 @@ npx @lapointelabs/tripwire scan --provider ollama --model qwen2.5-coder   # full
 npx @lapointelabs/tripwire scan --no-ai                                   # pattern confidence only
 ```
 
-`tripwire providers` shows what is configured. Anthropic, any OpenAI-compatible endpoint, and Ollama are supported; `--base-url` covers self-hosted and proxied gateways.
+`tripwire providers` shows what is configured. Supported:
+
+| Provider | Key | SDK | Shape |
+| --- | --- | --- | --- |
+| `anthropic` | `ANTHROPIC_API_KEY` | `@anthropic-ai/sdk` | Chat endpoint |
+| `openai` | `OPENAI_API_KEY` | `openai` | Chat endpoint (any OpenAI-compatible URL) |
+| `cursor` | `CURSOR_API_KEY` | `@cursor/sdk` *(optional peer)* | Cloud agent |
+| `ollama` | none | `ollama` | Local chat endpoint |
+
+Every provider goes through its vendor's official SDK rather than hand-rolled HTTP. Model
+APIs drift — parameters get removed, auth changes, new stop reasons appear — and an SDK
+absorbs that in a version bump instead of a silent breakage this project has to chase. The
+SDKs also own retry, backoff, and timeout handling. They are imported lazily, so a scan
+that never triages pays none of the load cost.
+
+**Cursor's SDK is an optional peer, not a dependency.** It currently pulls a high-severity
+transitive advisory (`@connectrpc/connect-node` → `undici`, no fix available). Forcing that
+on everyone who installs a security scanner would break `npm audit` in their CI, so it is
+opt-in:
+
+```sh
+npm install @cursor/sdk
+```
+
+Without it, `--provider cursor` reports what to install and the scan continues on pattern
+confidence rather than failing. `--base-url` covers self-hosted and proxied gateways.
+
+**Cursor works differently from the others.** Its API launches agents; there is no chat
+endpoint to post a prompt to. Each triage batch therefore runs as a **no-repo cloud
+agent** — created with the prompt, polled until its run reaches a terminal state, then
+read from `result`. No repository is attached, nothing is cloned, no branch or pull
+request is created. Expect it to be slower per batch than a chat provider, so Tripwire
+sends larger batches at lower concurrency and allows minutes rather than seconds.
 
 Files the deterministic pass flagged as containing a credential are never sent to any model.
 
@@ -211,7 +243,7 @@ tripwire providers          List model providers for the triage layer.
   --out DIR                 Also write report.md and SARIF here. Default: a cache
                             directory outside the repository.
   --json                    Print findings as JSON and write no files.
-  --provider NAME           anthropic | openai | ollama.
+  --provider NAME           anthropic | openai | cursor | ollama.
   --model NAME              Model id.
   --api-key KEY             Overrides the environment variable.
   --base-url URL            For self-hosted or proxied endpoints.

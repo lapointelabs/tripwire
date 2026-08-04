@@ -49,7 +49,8 @@ Skill options:
   --force                   Overwrite a skill file Tripwire did not write.
 
 Model triage (bring your own key):
-  --provider NAME           anthropic | openai | ollama. Default: whichever key is set.
+  --provider NAME           anthropic | openai | cursor | ollama.
+                            Default: whichever key is set.
   --model NAME              Model id. Default: the provider's recommended model.
   --api-key KEY             Overrides the environment variable.
   --base-url URL            For self-hosted or proxied endpoints.
@@ -216,18 +217,28 @@ function commandRules(flags) {
   write("");
 }
 
-function commandProviders(flags) {
+async function commandProviders(flags) {
   const palette = createPalette(!flags["no-color"]);
   write("");
   for (const provider of listProviders()) {
     const configured = provider.envKeys.some((key) => process.env[key]);
-    const status = provider.envKeys.length
+    const key = provider.envKeys.length
       ? (configured ? palette.green("key found") : palette.dim(`set ${provider.envKeys[0]}`))
       : palette.dim("no key needed");
-    write(`  ${palette.bold(provider.id.padEnd(12))} ${provider.label.padEnd(22)} ${palette.dim(provider.defaultModel.padEnd(20))} ${status}`);
+
+    let sdk;
+    try {
+      await import(provider.package);
+      sdk = palette.dim("sdk installed");
+    } catch {
+      sdk = palette.yellow(`npm i ${provider.package}`);
+    }
+
+    write(`  ${palette.bold(provider.id.padEnd(11))} ${provider.label.padEnd(22)} ${palette.dim(provider.defaultModel.padEnd(16))} ${key.padEnd(24)} ${sdk}`);
   }
   write("");
   write(palette.dim("  Pass --provider to override auto-detection, --model to change the model."));
+  write(palette.dim("  Cursor's SDK is an optional peer — install it only if you want Cursor triage."));
   write("");
 }
 
@@ -417,14 +428,22 @@ async function runTriage(result, flags, root, palette) {
   };
 
   const budget = Number(flag(flags, "budget", 250)) || 250;
-  const outcome = await triageFindings(result.findings, {
-    resolved,
-    readFile: readSource,
-    budget,
-    onProgress: ({ index, total }) => {
-      if (!flags.json) process.stderr.write(`${palette.dim(`triaging ${index}/${total}…`)}\r`);
-    }
-  });
+  let outcome;
+  try {
+    outcome = await triageFindings(result.findings, {
+      resolved,
+      readFile: readSource,
+      budget,
+      onProgress: ({ index, total }) => {
+        if (!flags.json) process.stderr.write(`${palette.dim(`triaging ${index}/${total}…`)}\r`);
+      }
+    });
+  } catch (error) {
+    // Triage is additive. A missing optional SDK, a bad key, or an unreachable endpoint
+    // must degrade the scan to pattern confidence — never take the whole run down.
+    if (!flags.json) process.stderr.write(`${" ".repeat(40)}\r`);
+    return { used: false, reason: error.message };
+  }
   if (!flags.json) process.stderr.write(`${" ".repeat(40)}\r`);
 
   return {
