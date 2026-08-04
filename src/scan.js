@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { capabilitiesOf, findAgentContextFiles } from "./detect.js";
-import { fileRules, projectRules, rulesForLanguage, selectRules } from "./rules/index.js";
+import { crossProjectRules, fileRules, projectRules, rulesForLanguage, selectRules } from "./rules/index.js";
+import { relevantForTaint } from "./rules/taint.js";
 import { prepareFile } from "./source.js";
 import { compileIgnorePatterns, mapWithConcurrency, readJson, readText, relativePath, walkSourceFiles } from "./util.js";
 
@@ -89,6 +90,9 @@ export async function scanProject(options) {
   return {
     project,
     capabilities,
+    // Retained for the cross-project pass. Only files that bind request data or hold a
+    // sink are kept, so the union across a large solution stays small.
+    taintCandidates: preparedFiles.filter(relevantForTaint),
     findings: dedupe(findings),
     stats: {
       files: files.length,
@@ -162,4 +166,36 @@ function countIdentifiers(preparedFiles) {
     }
   }
   return counts;
+}
+
+/**
+ * Run rules that need the whole solution at once, after every project has been scanned.
+ *
+ * Findings are attributed to the project that owns the entry-point file, so a chain from
+ * a controller in one assembly into a helper in another is reported where someone would
+ * go to fix it — at the route that exposes it.
+ */
+export async function scanAcrossProjects(results, { only = [], skip = [], onProgress = () => {} } = {}) {
+  const selection = selectRules(crossProjectRules, { capabilities: { ai: true, database: true, web: true }, only, skip });
+  if (!selection.active.length || results.length === 0) return;
+
+  const files = results.flatMap((result) => result.taintCandidates || []);
+  if (!files.length) return;
+
+  for (const rule of selection.active) {
+    let raw;
+    try {
+      raw = (await rule.scanCross({ files, projects: results.map((result) => result.project) })) || [];
+    } catch (error) {
+      onProgress({ kind: "rule-error", rule: rule.id, message: error.message });
+      continue;
+    }
+    for (const item of raw) {
+      // Attribute to the project whose file the entry point lives in.
+      const owner = results.find((result) => (result.taintCandidates || []).some((file) => file.relative === item.file))
+        || results[0];
+      owner.findings.push(toFinding(rule, item.file, item));
+      owner.findings.sort(compareFindings);
+    }
+  }
 }

@@ -1,7 +1,7 @@
 import { matches } from "../source.js";
 import {
   CS, JS, PY, contextAfter, contextBefore, evidenceOf, interpolationExpressions,
-  looksLikeSql, templateTag, UNTRUSTED_NAME
+  interpreterFor, looksLikeSql, templateTag, untrustedNames, UNTRUSTED_NAME
 } from "./helpers.js";
 
 /** Tagged templates that parameterize their interpolations rather than splicing them. */
@@ -118,14 +118,26 @@ export const injectionRules = [
         /\bProcess\.Start\s*\(\s*(?:\$?"[^"]*"\s*\+|\$")/,
         /\bArguments\s*=\s*(?:\$"|[^;\n]*\+)/
       ];
+      const tainted = untrustedNames(file);
       for (const pattern of shellCalls) {
-        for (const { line } of matches(file, pattern, "text")) {
+        for (const { line, index } of matches(file, pattern, "text")) {
           if (findings.some((existing) => existing.line === line)) continue;
+
+          // An explicitly named interpreter removes the only real ambiguity in this rule.
+          // `cmd.exe /c`, `/bin/sh -c`, and `powershell -Command` parse their argument
+          // string for metacharacters by definition, so an interpolation there is a shell
+          // injection regardless of what the variable is called.
+          const shell = interpreterFor(file, index);
+          const evidence = evidenceOf(file, line);
+          const named = [...tainted].find((name) => new RegExp(`\\b${name}\\b`).test(evidence));
+
           findings.push({
             line,
-            evidence: evidenceOf(file, line),
-            message: "Command string is assembled from a variable before reaching a shell.",
-            confidence: UNTRUSTED_NAME.test(file.lineText(line)) ? "high" : "medium"
+            evidence,
+            message: shell
+              ? `Interpolated into an argument string passed to \`${shell}\`, which parses it for shell metacharacters.${named ? ` \`${named}\` is bound from the request.` : ""}`
+              : `Command string is assembled from a variable before reaching a shell.${named ? ` \`${named}\` is bound from the request.` : ""}`,
+            confidence: shell || named || UNTRUSTED_NAME.test(evidence) ? "high" : "medium"
           });
         }
       }

@@ -86,6 +86,12 @@ function renderGroup(group, palette, options) {
   for (const finding of shown) {
     const marker = confidenceMarker(finding, palette);
     lines.push(`      ${palette.blue(`${finding.file}:${finding.line}`)}${marker}`);
+    // The per-finding message carries what the rule title cannot: which value, which
+    // route, which sink. For a reachability finding it *is* the finding, so printing
+    // only the evidence line throws away the part worth reading.
+    if (finding.message && finding.message !== group.title) {
+      lines.push(`        ${wrap(stripMarkup(finding.message), 88, "        ")}`);
+    }
     if (finding.evidence) lines.push(`        ${palette.dim(truncate(finding.evidence, 96))}`);
     if (finding.verdict?.reason) lines.push(`        ${palette.dim(`verified: ${truncate(finding.verdict.reason, 92)}`)}`);
   }
@@ -125,6 +131,10 @@ function scorecard(summary, palette) {
 
 function divider(palette) {
   return palette.dim("─".repeat(78));
+}
+
+function stripMarkup(text) {
+  return String(text).replace(/`/g, "");
 }
 
 function truncate(value, length) {

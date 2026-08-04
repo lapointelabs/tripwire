@@ -3,10 +3,13 @@ import { injectionRules } from "./injection.js";
 import { llmRules } from "./llm.js";
 import { secretRules } from "./secrets.js";
 import { structureProjectRules, structureRules } from "./structure.js";
+import { taintCrossProjectRules } from "./taint.js";
+import { telemetryProjectRules, telemetryRules } from "./telemetry.js";
 import { webRules } from "./web.js";
 
 export const CATEGORIES = {
   security: { label: "Security", weight: 1 },
+  privacy: { label: "Privacy", weight: 1 },
   "agent-safety": { label: "Agent safety", weight: 1 },
   correctness: { label: "Correctness", weight: 0.8 },
   maintainability: { label: "Maintainability", weight: 0.4 },
@@ -21,6 +24,7 @@ export const fileRules = [
   ...injectionRules,
   ...webRules,
   ...secretRules,
+  ...telemetryRules,
   ...llmRules,
   ...contextRules,
   ...structureRules
@@ -28,10 +32,17 @@ export const fileRules = [
 
 export const projectRules = [
   ...contextProjectRules,
+  ...telemetryProjectRules,
   ...structureProjectRules
 ];
 
-export const allRules = [...fileRules, ...projectRules];
+/**
+ * Rules that need files from every project in the run at once. Reachability is the only
+ * analysis here that cannot be answered inside one project boundary.
+ */
+export const crossProjectRules = [...taintCrossProjectRules];
+
+export const allRules = [...fileRules, ...projectRules, ...crossProjectRules];
 
 export function ruleById(id) {
   return allRules.find((rule) => rule.id === id) || null;

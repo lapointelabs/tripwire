@@ -83,6 +83,33 @@ const FALSE_POSITIVES = {
   "structure/silenced-error": [
     "A catch that is genuinely best-effort and documented as such in wording Tripwire does not recognize."
   ],
+  "taint/request-reaches-execution-sink": [
+    "A method name that collides across files, since the join resolves a receiver by file name and a bare call by method name rather than by type. Check that the file named in the message is the one actually called.",
+    "A value validated between the entry point and the sink — by a helper, an attribute, or a framework filter — which a one-hop join does not follow.",
+    "An internal endpoint behind authentication and network policy. The chain is still real; the exposure is narrower."
+  ],
+  "telemetry/default-pii-enabled": [
+    "A send hook elsewhere in the project that strips the payload before it leaves. Tripwire only looks in the same file, so a hook registered in a shared bootstrap module will be missed.",
+    "A local-only or development configuration that never runs in an environment holding real data."
+  ],
+  "telemetry/user-identity-attached": [
+    "A field named like personal data that holds an opaque value — a \`username\` that is a generated handle, or an \`email\` already hashed upstream."
+  ],
+  "telemetry/full-trace-sampling": [
+    "A low-traffic internal service where complete traces are a deliberate, documented choice.",
+    "Sampling gated by a helper function rather than an inline branch, which Tripwire cannot follow."
+  ],
+  "telemetry/scrubbed-from-logs-only": [
+    "A telemetry send hook registered in a different file. This rule reasons about one file at a time, which is why it reports at low confidence."
+  ],
+  "auth/credential-in-query-string": [
+    "A protocol that genuinely requires it — browser WebSocket clients cannot set an Authorization header — where the token is already single-use and short-lived. The exposure is real regardless; the question is whether every sink that records URLs strips it.",
+    "A parameter named like a credential that carries an opaque, non-authenticating identifier."
+  ],
+  "config/hardcoded-overrides-config": [
+    "A property name that coincidentally matches an unrelated configuration key, since matching is on the leaf name rather than the full binding path.",
+    "A deliberate override for a value the configuration file only documents as a default."
+  ],
   "structure/monolith-file": [
     "A generated file, a vendored dependency, or a data table, none of which are read the way source is."
   ]

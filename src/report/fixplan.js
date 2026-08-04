@@ -169,6 +169,19 @@ export function acceptanceCriteria(finding, group) {
       `The literal value is gone from the working tree and loaded from the environment or a secret manager instead.`,
       `The file holding it is covered by \`.gitignore\` if it is a local config file.`
     ],
+    "taint/request-reaches-execution-sink": [
+      `The entry point validates the value against an allow-list — a strict pattern, a resolved host, or a fixed set — and rejects anything else, before it is passed on.`,
+      `The sink no longer goes through a shell: arguments are passed as an array so no interpreter parses them.`,
+      `You have checked whether the endpoint requires authentication, and said so — it changes who can reach this, not whether the chain exists.`
+    ],
+    "telemetry/default-pii-enabled": [
+      `The setting is off, or a send hook demonstrably removes identity, cookies, and URL query strings before the event is transmitted.`,
+      `You have said which data was in scope while it was on, and for how long — that determines whether this is also a disclosure to report.`
+    ],
+    "auth/credential-in-query-string": [
+      `The credential moved to a header or a scoped cookie — or, where the protocol forces the query string, it is single-use and short-lived.`,
+      `Every sink that records URLs strips it: application logs, proxy and CDN logs, **and** the telemetry SDK.`
+    ],
     "context/secret-in-agent-context": [
       `**The credential has been rotated** — this file is uploaded to a model provider on every agent run, so the value must be assumed disclosed.`,
       `The instruction file now names the environment variable rather than containing its value.`

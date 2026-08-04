@@ -12,7 +12,7 @@ import { renderReportMarkdown } from "./report/markdown.js";
 import { renderSarif } from "./report/sarif.js";
 import { renderTerminalReport } from "./report/terminal.js";
 import { allRules, CATEGORIES, SEVERITIES } from "./rules/index.js";
-import { scanProject } from "./scan.js";
+import { scanAcrossProjects, scanProject } from "./scan.js";
 import { scoreProject } from "./score.js";
 import { artifactDirFor, createPalette, flag, flagList, parseArgs, readJson } from "./util.js";
 import { VERSION } from "./version.js";
@@ -291,6 +291,10 @@ async function commandScan(root, flags) {
 
     if (!quiet) process.stderr.write(`${" ".repeat(60)}\r`);
   }
+
+  // Reachability spans assemblies, so it runs once over every project scanned.
+  await scanAcrossProjects(results, { only, skip });
+  for (const result of results) result.summary = scoreProject(result.findings, result.stats);
 
   if (flags.score) {
     for (const result of results) write(String(result.summary.score));

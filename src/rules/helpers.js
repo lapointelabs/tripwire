@@ -17,6 +17,50 @@ export function isPlaceholder(value) {
   return distinct < 6;
 }
 
+/**
+ * Names in this file that hold request-controlled data.
+ *
+ * A regex over conventional names (`req`, `body`, `params`) covers Express-shaped code
+ * and misses the framework that states it outright. ASP.NET binds an action parameter
+ * from the request with an attribute — `[FromQuery] string host` — and after that the
+ * value travels under an ordinary domain name like `host` or `id` with nothing about the
+ * identifier to suggest an attacker chose it. Reading the binding is the difference
+ * between a medium-confidence guess and a fact.
+ */
+export function untrustedNames(file) {
+  const names = new Set();
+
+  // ASP.NET model binding: [FromQuery] string host, [FromBody] Dto payload, …
+  for (const match of file.text.matchAll(/\[From(?:Query|Route|Body|Form|Header)(?:\([^)]*\))?\]\s*(?:params\s+)?[\w<>,.\[\]?]+\s+(\w+)/g)) {
+    names.add(match[1]);
+  }
+  // A minimal-API or controller parameter read straight off the request.
+  for (const match of file.text.matchAll(/\b(?:Request\.Query|Request\.Form|Request\.Headers|Request\.RouteValues)\s*\[[^\]]+\]\s*;?/g)) {
+    const assignment = file.text.slice(Math.max(0, match.index - 80), match.index).match(/(?:var|string|string\?)\s+(\w+)\s*=\s*$/);
+    if (assignment) names.add(assignment[1]);
+  }
+  // Node: const { host } = req.query / req.body / req.params
+  for (const match of file.text.matchAll(/(?:const|let|var)\s*\{([^}]*)\}\s*=\s*(?:req|request)\.(?:query|body|params)/g)) {
+    for (const piece of match[1].split(",")) {
+      const name = piece.split(":").pop().trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+    }
+  }
+  for (const match of file.text.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:req|request)\.(?:query|body|params)\b/g)) {
+    names.add(match[1]);
+  }
+  names.delete("");
+  return names;
+}
+
+/** The shell interpreter a nearby `FileName`/executable assignment names, if any. */
+export function interpreterFor(file, index) {
+  const window = file.text.slice(Math.max(0, index - 400), index + 200);
+  const match = window.match(/(?:FileName|executable|command|shell)\s*[:=]\s*["'`]([^"'`]*\b(?:cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh|bash|zsh|sh)\b[^"'`]*)["'`]/i)
+    || window.match(/["'`](\/bin\/(?:sh|bash|zsh))["'`]/);
+  return match ? match[1] : null;
+}
+
 /** The identifier immediately preceding a template literal, if it is a tagged template. */
 export function templateTag(file, literal) {
   const before = file.text.slice(Math.max(0, literal.start - 64), literal.start);
