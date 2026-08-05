@@ -108,7 +108,18 @@ jobs:
         # No NODE_AUTH_TOKEN. Authentication is the OIDC token from `id-token: write`
         # above, exchanged with the registry for a short-lived publish credential. There
         # is no long-lived secret in this repository to leak or rotate.
-        run: npm publish
+        #
+        # `npm publish` applies the `latest` dist-tag unless told otherwise — including
+        # for prereleases. Without this, tagging v0.2.0-rc.1 would serve a release
+        # candidate to everyone running `npx @lapointelabs/tripwire`.
+        run: |
+          VER="$(node -p 'require("./package.json").version')"
+          case "$VER" in
+            *-*) TAG="next" ;;
+            *)   TAG="latest" ;;
+          esac
+          echo "publishing $VER under dist-tag $TAG"
+          npm publish --tag "$TAG"
 
       # A repeatable smoke test, which means it must not fail merely because the version in
       # package.json is already on the registry — after any release, it always is.
