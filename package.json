@@ -1,6 +1,6 @@
 {
   "name": "@lapointelabs/tripwire",
-  "version": "0.1.0",
+  "version": "0.1.1-rc.0",
   "description": "Security scan for Claude Code, Cursor, and coding agents — injection sinks, secrets, prompt-injection surfaces, and repo lies that mislead LLMs.",
   "type": "module",
   "bin": {
