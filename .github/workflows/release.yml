@@ -110,8 +110,26 @@ jobs:
         # is no long-lived secret in this repository to leak or rotate.
         run: npm publish
 
+      # A repeatable smoke test, which means it must not fail merely because the version in
+      # package.json is already on the registry — after any release, it always is.
+      #
+      # That check is worth keeping rather than suppressing, though: discovering that the
+      # version you are about to tag was already published is exactly what you want to
+      # learn here, and not from a failed release job.
       - name: Publish dry run
         if: "!startsWith(github.ref, 'refs/tags/v') || inputs.dry_run == true"
         run: |
-          npm publish --dry-run
-          echo "::notice::Dry run only — this does not exercise OIDC authentication. The first tag push is the real test."
+          NAME="$(node -p 'require("./package.json").name')"
+          VER="$(node -p 'require("./package.json").version')"
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${NAME/\//%2f}/$VER")"
+
+          if [ "$CODE" = "200" ]; then
+            echo "::notice::$NAME@$VER is already published — skipping the dry run. Bump the version before tagging a release."
+            npm pack --ignore-scripts >/dev/null
+            echo "Tarball still builds cleanly:"
+            ls -la lapointelabs-tripwire-*.tgz
+          else
+            npm publish --dry-run
+          fi
+
+          echo "::warning::A dry run does not exercise OIDC authentication — npm only exchanges the identity token on a real publish. The first tag push is the real test of trusted publishing."
