@@ -313,3 +313,49 @@ export async function findAgentContextFiles(root) {
   }
   return found;
 }
+
+/** Where each harness keeps its MCP server list. */
+const MCP_CONFIGS = [
+  ".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json", ".gemini/settings.json",
+  ".claude/settings.json", ".claude/settings.local.json"
+];
+
+/** Directories whose immediate children are skill bundles, each with a SKILL.md. */
+const SKILL_ROOTS = [".claude/skills", ".cursor/skills"];
+
+/**
+ * The agent's *tool* surface, as distinct from its instruction files.
+ *
+ * An instruction file tells the model what to do; an MCP server and a skill hand it new
+ * capabilities, and their descriptions are loaded into context where the model cannot tell
+ * a description from a directive. Tripwire's own rules read the instruction files. This is
+ * what it hands to an engine that can inspect the tools.
+ */
+export async function findAgentSurfaceFiles(root) {
+  const mcpConfigs = [];
+  for (const candidate of MCP_CONFIGS) {
+    const absolute = path.join(root, candidate);
+    if (await exists(absolute)) mcpConfigs.push({ absolute, relative: candidate });
+  }
+
+  const skills = [];
+  for (const skillRoot of SKILL_ROOTS) {
+    const directory = path.join(root, skillRoot);
+    if (!(await exists(directory))) continue;
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const manifest = path.join(directory, entry.name, "SKILL.md");
+      if (await exists(manifest)) {
+        skills.push({ absolute: manifest, relative: `${skillRoot}/${entry.name}/SKILL.md` });
+      }
+    }
+  }
+
+  return { mcpConfigs, skills };
+}

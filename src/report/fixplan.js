@@ -50,6 +50,12 @@ export function renderFixPlan(result, meta) {
   out.push(`- **Report honestly at the end.** State how many tasks you fixed, how many you marked not applicable and why, and anything you could not resolve. Do not claim completion for work you did not verify.`);
   out.push("");
 
+  if (result.engines?.coverage?.some((entry) => entry.ran)) {
+    const ran = result.engines.coverage.filter((entry) => entry.ran).map((entry) => entry.label);
+    out.push(`> **Some tasks came from other engines** (${ran.join(", ")}). Those carry a **Reported by** line naming the engine and its rule id — go read that rule before deciding a finding is wrong. Tripwire normalized the severity and confidence; it did not re-derive the finding.`);
+    out.push("");
+  }
+
   if (!ai?.used) {
     out.push(`> **These findings were not triaged by a model.** Each one is a pattern match with a stated confidence. Tasks marked *unverified* are the most likely to be false positives — read those especially carefully before changing anything.`);
     out.push("");
@@ -104,6 +110,17 @@ function renderTask(number, finding, group) {
   out.push("");
   out.push(`**What matched.** ${finding.message}`);
   out.push("");
+  if (finding.source) {
+    // Name the engine and its rule. An agent deciding whether a finding is real needs
+    // somewhere to go and read the rule's own definition; "the scanner said so" is not it.
+    const agreement = finding.corroboratedBy?.length ? ` Independently confirmed by ${finding.corroboratedBy.join(", ")}.` : "";
+    const refs = finding.source.refs?.length ? ` Reference: ${finding.source.refs[0]}` : "";
+    out.push(`**Reported by.** ${finding.source.label}, rule \`${finding.source.ruleId}\`.${agreement}${refs}`);
+    out.push("");
+  } else if (finding.corroboratedBy?.length) {
+    out.push(`**Reported by.** Tripwire, independently confirmed by ${finding.corroboratedBy.join(", ")}.`);
+    out.push("");
+  }
   if (finding.evidence) {
     out.push("```");
     out.push(`${finding.file}:${finding.line}`);
@@ -168,6 +185,23 @@ export function acceptanceCriteria(finding, group) {
       `**The credential has been rotated.** This is not optional and cannot be done by editing files — the old value stays valid until someone revokes it. If you cannot rotate it, mark this task \`[!]\` and say so plainly.`,
       `The literal value is gone from the working tree and loaded from the environment or a secret manager instead.`,
       `The file holding it is covered by \`.gitignore\` if it is a local config file.`
+    ],
+    "external/secret": [
+      `**The credential has been rotated.** A secret-scanning engine found it, which means the value is in a file anyone with repository access can read — and, if it was ever pushed, in history where deleting the line does not reach it. Where the finding says *verified*, the engine authenticated with the key successfully: there is nothing left to assess. Rotation is a human action; if you cannot do it, mark this \`[!]\` and say so.`,
+      `The literal value is gone from the working tree and loaded from the environment or a secret manager instead.`,
+      `You have checked whether the same value appears elsewhere in the repository — credentials are usually copied, not moved.`
+    ],
+    "external/agent-surface": [
+      `The component's own description text has been read in full, not just its name — the payload, if there is one, is in the prose the model receives.`,
+      `Anything instructing the model to ignore prior context, read credentials or environment variables, or contact an unrelated host is removed, and the component is removed with it if that was its purpose.`,
+      `The component is pinned to a version and a source you control, so its instructions cannot change without a change landing in this repository.`
+    ],
+    "external/code-analysis": [
+      `You have read the engine's own rule text for the id cited above and followed the path it reports from entry point to sink.`,
+      `The fix is at the sink and uses a construct that cannot express the unsafe form, rather than a validation bolted on upstream that a future caller can bypass.`
+    ],
+    "external/agent-config": [
+      `The defect the engine named is fixed, and the harness demonstrably loads the file — a file that parses is not the same as a file that applies.`
     ],
     "supply-chain/no-lockfile": [
       `A lockfile is committed, and CI installs with the frozen flag so a drifted lockfile fails the build rather than being rewritten.`

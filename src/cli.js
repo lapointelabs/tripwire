@@ -3,7 +3,9 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { listProviders, resolveProvider, triageFindings } from "./ai.js";
 import { auditProject, VULNERABLE_DEPENDENCY_RULE } from "./audit.js";
-import { detectProjects, groupByStack } from "./detect.js";
+import { loadConfig, resolveSelection, unknownEngines } from "./config.js";
+import { detectProjects, findAgentContextFiles, findAgentSurfaceFiles, groupByStack } from "./detect.js";
+import { DOMAINS, ENGINES, planEngines, reconcile, relativizer, runEngines, uncoveredDomains } from "./engines/index.js";
 import { explainRule, findRule } from "./explain.js";
 import { changedFiles, filterToChanged, resolveBase } from "./git.js";
 import { PLAYBOOK } from "./playbook.js";
@@ -13,7 +15,7 @@ import { renderReportMarkdown } from "./report/markdown.js";
 import { renderSarif } from "./report/sarif.js";
 import { renderTerminalReport } from "./report/terminal.js";
 import { allRules, CATEGORIES, SEVERITIES } from "./rules/index.js";
-import { scanAcrossProjects, scanProject } from "./scan.js";
+import { compareFindings, scanAcrossProjects, scanProject } from "./scan.js";
 import { scoreProject } from "./score.js";
 import { artifactDirFor, createPalette, flag, flagList, parseArgs, readJson } from "./util.js";
 import { VERSION } from "./version.js";
@@ -28,6 +30,7 @@ Usage:
   tripwire skills install     Install Tripwire as a skill for your coding agents.
   tripwire rules              List every rule.
   tripwire providers          List model providers for the triage layer.
+  tripwire engines            List external scan engines and what each one covers.
 
 Scan options:
   --scope changed|all       Report only findings in changed files. Default: all.
@@ -45,6 +48,19 @@ Scan options:
                             (npm/pnpm/yarn audit, dotnet, pip-audit) and include
                             its results. Spawns a subprocess and uses the network.
   --no-color                Disable colored output.
+
+External engines (bring your own tools):
+  --engines [LIST]          Run external engines and fold their findings into this
+                            report. Default when bare: auto — every installed engine.
+                            Also: all, none, or a list (semgrep,trufflehog).
+  --offline                 Refuse any engine that needs the network, and disable
+                            credential verification. For air-gapped build agents.
+
+  Nothing is bundled, downloaded, or auto-installed. Tripwire runs the binaries you
+  already have and normalizes their output into one finding model, one score, and one
+  fix plan. Commercial engines use your key from your environment; Tripwire reads no
+  key file, writes none, and proxies nothing. Engines that did not run are named in
+  the report along with what went unchecked.
 
 Skill options:
   --harness LIST            claude, cursor, copilot, agents. Default: detected.
@@ -74,7 +90,7 @@ export async function main(argv) {
   const { positionals, flags } = parseArgs(argv);
   // Match against the known verbs rather than guessing from the shape of the argument,
   // so `tripwire services/billing` scans that path instead of reporting it as a command.
-  const COMMANDS = new Set(["scan", "list", "rules", "providers", "explain", "playbook", "skills", "help"]);
+  const COMMANDS = new Set(["scan", "list", "rules", "providers", "engines", "explain", "playbook", "skills", "help"]);
   const named = positionals[0] && COMMANDS.has(positionals[0]);
   const command = named ? positionals[0] : "scan";
   const target = (named ? positionals[1] : positionals[0]) || ".";
@@ -87,6 +103,7 @@ export async function main(argv) {
     case "list": return commandList(path.resolve(target), flags);
     case "rules": return commandRules(flags);
     case "providers": return commandProviders(flags);
+    case "engines": return commandEngines(path.resolve(target), flags);
     case "explain": return commandExplain(target, flags);
     case "playbook": return write(PLAYBOOK);
     case "skills": return commandSkills(positionals, flags);
@@ -246,6 +263,89 @@ async function commandProviders(flags) {
   write("");
 }
 
+/**
+ * What Tripwire can delegate to, and what it would do for you if you installed it.
+ *
+ * Deliberately a full inventory rather than only what is present. The reason to read this
+ * is to find out what is *not* being checked, which is exactly the information a list of
+ * installed tools cannot give you.
+ */
+async function commandEngines(root, flags) {
+  const palette = createPalette(!flags["no-color"]);
+  const config = await loadConfig(root);
+  const context = await engineContext(root, null, config, { selection: "all", offline: Boolean(flags.offline) });
+  const plan = await planEngines(context);
+
+  if (flags.json) {
+    return write(JSON.stringify(plan.map((entry) => ({
+      id: entry.engine.id,
+      label: entry.engine.label,
+      domain: entry.engine.domain,
+      covers: entry.engine.covers,
+      install: entry.engine.install,
+      homepage: entry.engine.homepage,
+      paid: Boolean(entry.engine.paid),
+      network: Boolean(entry.engine.network),
+      byok: entry.engine.byok || null,
+      available: entry.run,
+      status: entry.status,
+      reason: entry.reason || null
+    })), null, 2));
+  }
+
+  write("");
+  for (const [domain, detail] of Object.entries(DOMAINS)) {
+    const entries = plan.filter((entry) => entry.engine.domain === domain);
+    if (!entries.length) continue;
+    write(`  ${palette.bold(detail.label)}  ${palette.dim(`Tripwire natively: ${detail.native}`)}`);
+    for (const entry of entries) {
+      const { engine } = entry;
+      const status = entry.run
+        ? palette.green("ready")
+        : entry.status === "no-key" ? palette.yellow("needs key")
+          : entry.status === "not-applicable" ? palette.dim("n/a here")
+            : palette.dim("not installed");
+      const cost = engine.paid ? palette.yellow(" · commercial, BYOK") : "";
+      write(`    ${palette.bold(engine.id.padEnd(17))} ${status.padEnd(22)} ${palette.dim(engine.covers)}${cost}`);
+      if (!entry.run) write(`    ${" ".repeat(17)} ${palette.dim(entry.reason)}`);
+      if (engine.byok && !engine.byok.required) {
+        const set = engine.byok.env.some((name) => process.env[name]);
+        write(`    ${" ".repeat(17)} ${palette.dim(`${engine.byok.env.join(" / ")} ${set ? "found" : "not set"} — unlocks ${engine.byok.unlocks}`)}`);
+      }
+      if (engine.fills) write(`    ${" ".repeat(17)} ${palette.cyan("fills:")} ${palette.dim(engine.fills)}`);
+    }
+    write("");
+  }
+
+  write(palette.dim(`  ${plan.filter((entry) => entry.run).length} of ${ENGINES.length} ready. Run them with: tripwire scan --engines`));
+  write(palette.dim("  Nothing is bundled or auto-installed — Tripwire runs the binaries you install."));
+  if (config.file) write(palette.dim(`  Config: ${config.filename}`));
+  for (const warning of config.warnings) write(palette.yellow(`  config: ${warning}`));
+  write("");
+}
+
+/** The shared inputs every engine decision needs, gathered once. */
+async function engineContext(root, project, config, { selection, offline, onProgress }) {
+  const [agentFiles, surface] = await Promise.all([
+    findAgentContextFiles(root),
+    findAgentSurfaceFiles(root)
+  ]);
+  return {
+    root,
+    project,
+    projectDir: project?.directory || root,
+    manifest: project?.manifest || "package.json",
+    config: config.engines || {},
+    selection,
+    offline: Boolean(offline),
+    onProgress,
+    agentFiles: agentFiles.map((entry) => entry.relative),
+    mcpConfigs: surface.mcpConfigs.map((entry) => entry.absolute),
+    skills: surface.skills.map((entry) => entry.absolute),
+    toRelative: relativizer(root)
+  };
+}
+
 async function commandScan(root, flags) {
   const palette = createPalette(!flags["no-color"]);
   const projects = await detectProjects(root);
@@ -253,12 +353,23 @@ async function commandScan(root, flags) {
     throw new Error(`no projects detected under ${root}. Run "tripwire list ${root}" to see what Tripwire looks for.`);
   }
 
+  const config = await loadConfig(root);
   const selected = await selectProjects(projects, flags, palette);
   const only = flagList(flags, "only");
   const skip = flagList(flags, "skip");
-  const budget = Number(flag(flags, "budget", 250)) || 250;
 
   const quiet = Boolean(flags.json || flags.score);
+  const engineSelection = resolveSelection(flags.engines, config);
+  const offline = Boolean(flags.offline ?? config.scan?.offline);
+
+  if (!quiet) {
+    for (const warning of config.warnings) process.stderr.write(`tripwire: ${config.filename}: ${warning}\n`);
+  }
+  const unknown = unknownEngines(engineSelection);
+  if (unknown.length) {
+    throw new Error(`unknown engine${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")}. Run "tripwire engines" for the list.`);
+  }
+
   const scope = String(flag(flags, "scope", "all")).toLowerCase();
   if (!["all", "changed"].includes(scope)) throw new Error(`--scope expects "all" or "changed"`);
 
@@ -314,6 +425,28 @@ async function commandScan(root, flags) {
       if (!quiet) process.stderr.write(`${" ".repeat(60)}\r`);
     }
 
+    if (engineSelection !== "none") {
+      const context = await engineContext(root, project, config, {
+        selection: engineSelection,
+        offline,
+        onProgress: ({ engine }) => {
+          if (!quiet) process.stderr.write(`${palette.dim(`${engine} on ${project.relative}…`)}\r`);
+        }
+      });
+      const outcome = await runEngines(context);
+      result.engines = { coverage: outcome.coverage, uncovered: uncoveredDomains(outcome.coverage), offline };
+      result.findings.push(...outcome.findings);
+      if (changed) {
+        result.findings = filterToChanged(result.findings, changed.files, project.relative);
+      }
+      // Two engines and a native rule can all land on the same line. Collapsing them is
+      // the difference between one harness and five CI steps stapled together.
+      const before = result.findings.length;
+      result.findings = reconcile(result.findings).sort(compareFindings);
+      result.engines.deduplicated = before - result.findings.length;
+      if (!quiet) process.stderr.write(`${" ".repeat(60)}\r`);
+    }
+
     result.summary = scoreProject(result.findings, result.stats);
     result.ai = await runTriage(result, flags, root, palette);
     // Triage can refute findings, which changes the score — recompute after it runs.
@@ -339,6 +472,8 @@ async function commandScan(root, flags) {
       stats: result.stats,
       scope: result.scope || { mode: "all" },
       gatedRules: result.gatedRules,
+      engines: result.engines || null,
+      audit: result.audit || null,
       triage: result.ai,
       findings: result.findings
     })), null, 2));
@@ -443,9 +578,14 @@ async function runTriage(result, flags, root, palette) {
   });
   if (!resolved.available) return { used: false, reason: resolved.reason };
 
-  // Never send the contents of a file the scan flagged as holding a credential.
+  // Never send the contents of a file any source flagged as holding a credential —
+  // including an external secrets engine. Shipping a file to a third-party model in the
+  // course of reporting that its contents leaked would be the tool causing the incident
+  // it is describing.
   const secretFiles = new Set(result.findings
-    .filter((finding) => finding.ruleId.startsWith("secrets/") || finding.ruleId === "context/secret-in-agent-context")
+    .filter((finding) => finding.ruleId.startsWith("secrets/")
+      || finding.ruleId === "external/secret"
+      || finding.ruleId === "context/secret-in-agent-context")
     .map((finding) => finding.file));
 
   const cache = new Map();
@@ -515,6 +655,8 @@ async function writeArtifacts(result, meta, flags) {
       stats: result.stats,
       scope: result.scope || { mode: "all" },
       gatedRules: result.gatedRules,
+      engines: result.engines || null,
+      audit: result.audit || null,
       triage: result.ai,
       findings: result.findings
     }, null, 2)}\n`]

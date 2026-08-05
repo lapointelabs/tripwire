@@ -42,9 +42,28 @@ export function renderReportMarkdown(result, meta) {
     out.push("");
   }
 
+  if (result.engines) {
+    out.push(`## Engines`);
+    out.push("");
+    out.push(`| Engine | Covers | Status |`);
+    out.push(`| --- | --- | --- |`);
+    for (const entry of result.engines.coverage) {
+      const status = entry.ran
+        ? `ran as \`${entry.tool}\` — ${entry.total} ${pluralize(entry.total, "finding")}${entry.usedKey ? ` (authenticated with \`${entry.keyName}\`)` : ""}`
+        : entry.reason;
+      out.push(`| ${entry.label} | ${escapeCell(entry.covers)} | ${escapeCell(status)} |`);
+    }
+    out.push("");
+    if (result.engines.deduplicated) {
+      const count = result.engines.deduplicated;
+      out.push(`${count} ${pluralize(count, "finding")} ${pluralize(count, "was", "were")} reported by more than one source and collapsed into one, keeping the most authoritative version and noting who else agreed.`);
+      out.push("");
+    }
+  }
+
   out.push(`## What this scan did not cover`);
   out.push("");
-  out.push(readCoverage(capabilities, gatedRules, ai, result.audit));
+  out.push(readCoverage(capabilities, gatedRules, ai, result.audit, result.engines));
   out.push("");
 
   if (!groups.length) {
@@ -100,8 +119,22 @@ export function renderReportMarkdown(result, meta) {
   return `${out.join("\n")}\n`;
 }
 
-function readCoverage(capabilities, gatedRules, ai, audit) {
+function readCoverage(capabilities, gatedRules, ai, audit, engines) {
   const notes = [];
+  if (!engines) {
+    notes.push(`- **No external engines ran.** Tripwire's own rules are a broad first pass; deeper coverage — cross-file dataflow, credential verification, MCP and skill inspection — is delegated to engines you install. Re-run with \`--engines\`, or run \`tripwire engines\` to see what is available.`);
+  } else {
+    for (const gap of engines.uncovered || []) {
+      notes.push(`- **${gap.label} had no engine.** Tripwire's own coverage of this domain is ${gap.native}, and nothing deeper ran against it.`);
+    }
+    const notRun = new Set(["failed", "no-key", "offline", "disabled"]);
+    for (const entry of engines.coverage.filter((item) => notRun.has(item.status))) {
+      notes.push(`- **${entry.label} did not run:** ${entry.reason}. It would have covered ${entry.covers}.`);
+    }
+    if (engines.offline) {
+      notes.push(`- **Offline mode was on.** Engines needing the network were skipped, and credential verification was disabled — a secret reported here was matched by shape, not confirmed against its issuer.`);
+    }
+  }
   if (audit?.ran) {
     notes.push(`- **${audit.tool} reported ${audit.total} vulnerable ${audit.total === 1 ? "dependency" : "dependencies"}.**${audit.truncated ? ` ${audit.truncated} beyond the reporting limit are not listed.` : ""}`);
   } else if (audit) {

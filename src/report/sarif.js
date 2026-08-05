@@ -53,7 +53,13 @@ export function renderSarif(result, meta) {
         properties: {
           confidence: finding.confidence,
           triaged: Boolean(finding.verdict),
-          triageReason: finding.verdict?.reason
+          triageReason: finding.verdict?.reason,
+          // Uploading someone else's findings under your own tool's name, with no trace of
+          // where they came from, is how a security dashboard becomes unauditable.
+          engine: finding.source?.engine,
+          engineRuleId: finding.source?.ruleId,
+          verifiedCredential: finding.source?.verified,
+          corroboratedBy: finding.corroboratedBy?.length ? finding.corroboratedBy : undefined
         }
       }))
     }]

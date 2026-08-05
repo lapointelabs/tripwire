@@ -46,6 +46,8 @@ export function renderTerminalReport(result, palette, options = {}) {
     lines.push(palette.dim(`  Reporting only the ${result.scope.files} changed ${pluralize(result.scope.files, "file")} (${result.scope.base}). The whole project was analysed; findings elsewhere are not shown.`));
   }
 
+  lines.push(...engineLines(result, palette));
+
   if (result.audit?.ran) {
     const total = result.audit.total;
     lines.push(palette.dim(`  ${result.audit.tool}: ${total} vulnerable ${pluralize(total, "dependency", "dependencies")}${result.audit.truncated ? `, ${result.audit.truncated} beyond the reporting limit` : ""}`));
@@ -80,6 +82,62 @@ export function renderTerminalReport(result, palette, options = {}) {
   return lines.join("\n");
 }
 
+/**
+ * What the external engines covered, and — the part worth printing — what nobody did.
+ *
+ * A harness that runs five tools and reports only their combined findings has hidden the
+ * most useful fact it knows: which of the five was absent. That absence is the difference
+ * between "no secrets found" and "no secrets found by the fourteen patterns Tripwire
+ * ships, with no verification and no history scan", and the two must not read alike.
+ */
+function engineLines(result, palette) {
+  const lines = [];
+  if (!result.engines) {
+    lines.push(palette.dim("  External engines were not run — add --engines to fold Semgrep, TruffleHog, osv-scanner and others into this report."));
+    return lines;
+  }
+
+  const { coverage, uncovered, deduplicated, offline } = result.engines;
+  const ran = coverage.filter((entry) => entry.ran);
+  const failed = coverage.filter((entry) => entry.status === "failed");
+  const needKey = coverage.filter((entry) => entry.status === "no-key");
+
+  if (ran.length) {
+    const detail = ran
+      .map((entry) => `${entry.tool}${entry.total ? ` ${entry.total}` : " 0"}${entry.usedKey ? "*" : ""}`)
+      .join(" · ");
+    lines.push(palette.dim(`  Engines: ${detail}${offline ? "  (offline mode)" : ""}`));
+    if (ran.some((entry) => entry.usedKey)) {
+      lines.push(palette.dim(`  * authenticated with your own key from the environment`));
+    }
+    if (deduplicated) {
+      lines.push(palette.dim(`  ${deduplicated} duplicate ${pluralize(deduplicated, "finding")} collapsed where engines agreed on the same line.`));
+    }
+    for (const entry of ran.filter((item) => item.truncated)) {
+      lines.push(palette.yellow(`  ${entry.tool} reported ${entry.truncated} more beyond the per-engine reporting limit.`));
+    }
+  }
+
+  for (const entry of failed) {
+    lines.push(palette.yellow(`  ${entry.label} did not run: ${entry.reason}`));
+  }
+  for (const entry of needKey) {
+    lines.push(palette.yellow(`  ${entry.label} is installed but unauthenticated: ${entry.reason}`));
+  }
+  // An engine you asked for and did not get must be named. Only "not selected" is silent,
+  // because you already know what you did not ask for.
+  for (const entry of coverage.filter((item) => item.status === "offline" || item.status === "disabled")) {
+    lines.push(palette.yellow(`  ${entry.label} was skipped: ${entry.reason}`));
+  }
+
+  if (uncovered?.length) {
+    for (const gap of uncovered) {
+      lines.push(palette.dim(`  ${gap.label} had no engine — Tripwire's own coverage is ${gap.native}.`));
+    }
+  }
+  return lines;
+}
+
 function renderGroup(group, palette, options) {
   const style = SEVERITY_STYLE[group.severity];
   const paint = palette[style.color];
@@ -102,6 +160,14 @@ function renderGroup(group, palette, options) {
       lines.push(`        ${wrap(stripMarkup(finding.message), 88, "        ")}`);
     }
     if (finding.evidence) lines.push(`        ${palette.dim(truncate(finding.evidence, 96))}`);
+    // Provenance, so a finding you disagree with can be traced to the engine and the rule
+    // that raised it rather than to "the scanner".
+    if (finding.source) {
+      const agreement = finding.corroboratedBy?.length ? `, confirmed by ${finding.corroboratedBy.join(", ")}` : "";
+      lines.push(`        ${palette.dim(`via ${finding.source.label} · ${finding.source.ruleId}${agreement}`)}`);
+    } else if (finding.corroboratedBy?.length) {
+      lines.push(`        ${palette.dim(`confirmed by ${finding.corroboratedBy.join(", ")}`)}`);
+    }
     if (finding.verdict?.reason) lines.push(`        ${palette.dim(`verified: ${truncate(finding.verdict.reason, 92)}`)}`);
   }
   if (group.findings.length > shown.length) {

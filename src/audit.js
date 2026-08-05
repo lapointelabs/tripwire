@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { exists, readJson } from "./util.js";
+import { parseJson, parseJsonStream, runTool } from "./exec.js";
+import { exists } from "./util.js";
 
 /**
  * Dependency vulnerability auditing, delegated to each ecosystem's own tool.
@@ -13,12 +13,20 @@ import { exists, readJson } from "./util.js";
  *
  * So Tripwire runs them and normalizes the output into ordinary findings.
  *
- * This is opt-in (`--audit`) because it is the only part of a scan that spawns a
- * subprocess and reaches the network. A scanner that quietly makes network calls is a
- * scanner people cannot run on an air-gapped build agent, and surprising them once is
- * enough to lose the tool. When it has not run, the report says so rather than leaving
- * a clean-looking silence.
+ * This is opt-in (`--audit`) because it spawns a subprocess and reaches the network. A
+ * scanner that quietly makes network calls is a scanner people cannot run on an air-gapped
+ * build agent, and surprising them once is enough to lose the tool. When it has not run,
+ * the report says so rather than leaving a clean-looking silence.
+ *
+ * The per-ecosystem auditors here are the fallback path. `osv-scanner`, when installed,
+ * covers every ecosystem at once from a single database and is preferred — see
+ * `src/engines/`. These stay because they need no extra install: `npm audit` and
+ * `dotnet list package` ship with the toolchain someone already has.
  */
+
+// Re-exported so callers that reach for the audit module keep working; the implementation
+// now lives with the other subprocess plumbing.
+export { parseJsonStream };
 
 const TIMEOUT_MS = 120_000;
 
@@ -52,54 +60,7 @@ export const VULNERABLE_DEPENDENCY_RULE = {
 };
 
 function run(command, args, cwd) {
-  return new Promise((resolve) => {
-    let child;
-    try {
-      // Argument array, never a shell — this tool reports command injection; it should
-      // not introduce one by interpolating a project path into a shell string.
-      child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-    } catch (error) {
-      resolve({ ok: false, reason: error.message });
-      return;
-    }
-
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      resolve({ ok: false, reason: `${command} timed out after ${TIMEOUT_MS / 1000}s` });
-    }, TIMEOUT_MS);
-
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolve({ ok: false, reason: error.code === "ENOENT" ? `${command} is not installed` : error.message });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      // Audit tools exit non-zero *because* they found something, so the exit code says
-      // nothing about whether the run succeeded. Parsable output is the real signal.
-      resolve({ ok: true, code, stdout, stderr });
-    });
-  });
-}
-
-function parseJson(text) {
-  if (!text || !text.trim()) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    // Some tools print a human line before the JSON body.
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start === -1 || end <= start) return null;
-    try {
-      return JSON.parse(text.slice(start, end + 1));
-    } catch {
-      return null;
-    }
-  }
+  return runTool({ command, args, cwd, timeoutMs: TIMEOUT_MS });
 }
 
 /** npm 7+ `vulnerabilities` map, and the older `advisories` map pnpm still emits. */
@@ -173,52 +134,6 @@ function fromPipAudit(payload) {
     }
   }
   return found;
-}
-
-/**
- * Split a stream of concatenated top-level JSON values.
- *
- * `govulncheck -json` emits a sequence of pretty-printed objects rather than one document
- * or one-per-line, so neither `JSON.parse` nor splitting on newlines reads it. Brace
- * matching that skips over string contents does, without pulling in a streaming parser.
- */
-export function parseJsonStream(text) {
-  const values = [];
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === '"') inString = false;
-      continue;
-    }
-    if (char === '"') {
-      inString = true;
-      continue;
-    }
-    if (char === "{") {
-      if (depth === 0) start = index;
-      depth += 1;
-      continue;
-    }
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0 && start !== -1) {
-        try {
-          values.push(JSON.parse(text.slice(start, index + 1)));
-        } catch {
-          // A truncated trailing object is expected when a tool is killed; skip it.
-        }
-        start = -1;
-      }
-    }
-  }
-  return values;
 }
 
 /**

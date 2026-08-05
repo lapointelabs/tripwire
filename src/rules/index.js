@@ -4,7 +4,7 @@ import { llmRules } from "./llm.js";
 import { secretRules } from "./secrets.js";
 import { structureProjectRules, structureRules } from "./structure.js";
 import { supplyChainProjectRules } from "./supply-chain.js";
-import { VULNERABLE_DEPENDENCY_RULE } from "../audit.js";
+import { externalRules } from "./external.js";
 import { taintCrossProjectRules } from "./taint.js";
 import { telemetryProjectRules, telemetryRules } from "./telemetry.js";
 import { webRules } from "./web.js";
@@ -46,8 +46,11 @@ export const projectRules = [
  */
 export const crossProjectRules = [...taintCrossProjectRules];
 
-/** Findings sourced from an external auditor rather than from scanning source. */
-export const externalRules = [VULNERABLE_DEPENDENCY_RULE];
+/**
+ * Findings sourced from another tool rather than from scanning source: the ecosystem
+ * auditors behind `--audit`, and the engines behind `--engines`.
+ */
+export { externalRules };
 
 export const allRules = [...fileRules, ...projectRules, ...crossProjectRules, ...externalRules];
 

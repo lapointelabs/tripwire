@@ -90,10 +90,12 @@ rename that dodges the pattern.
 | \`scan\` | Full scan of the project |
 | \`scan --score\` | Print only the numeric score |
 | \`scan --fail-on high\` | Exit non-zero at or above a severity (CI) |
+| \`scan --engines\` | Also run every installed external engine |
 | \`list\` | List detected projects, grouped by stack |
 | \`explain <rule-id>\` | Full detail for one rule |
 | \`playbook\` | Print the triage playbook |
 | \`rules\` | List every rule |
+| \`engines\` | External engines, what each covers, and what is missing |
 
 Add \`--project <name>\` in a monorepo. Triage runs automatically when \`ANTHROPIC_API_KEY\`,
 \`OPENAI_API_KEY\`, or a local Ollama is available; add \`--no-ai\` to skip it.
@@ -178,6 +180,8 @@ that dodges the pattern.
 | \`${tw} scan --score\` | Numeric score only |
 | \`${tw} scan --fail-on high\` | Exit non-zero at or above a severity (CI) |
 | \`${tw} scan --audit\` | Also run npm/pnpm/dotnet/pip vulnerability auditors |
+| \`${tw} scan --engines\` | Also run installed engines (Semgrep, TruffleHog, osv-scanner, agnix) |
+| \`${tw} engines\` | What each engine covers, and which domains nothing covered |
 | \`${tw} explain <rule-id>\` | Rule detail and its false positives |
 | \`${tw} list\` | Detected projects, grouped by stack |
 

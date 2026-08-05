@@ -4,6 +4,8 @@ A security scan for Claude Code, Cursor, and coding agents. Tripwire finds injec
 
 It covers the usual scanner territory and a category most scanners miss: **prompt-injection surfaces, model output flowing into a shell, tool descriptions assembled from runtime data, doc blocks that disagree with their function signature, and `CLAUDE.md` files pointing at scripts that no longer exist.**
 
+Where a specialist tool is better — cross-file dataflow, credential verification, advisory databases, MCP and skill inspection — Tripwire [runs that tool](#external-engines) rather than reimplementing it, and reconciles its findings into one report, one score, and one fix plan.
+
 Created by [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. Requires Node.js 20.1+.
 
 ## Quick start
@@ -155,10 +157,134 @@ sends larger batches at lower concurrency and allows minutes rather than seconds
 
 Files the deterministic pass flagged as containing a credential are never sent to any model.
 
+## External engines
+
+Tripwire does not try to out-depth the specialists. For an advisory database, 800 secret
+detectors, or a cross-file dataflow engine, a generalist scanner reimplementing the thing
+badly is worse than no coverage at all — a shallow pass that reports nothing reads exactly
+like a clean one.
+
+So it runs them instead, and folds their output into one report:
+
+```sh
+npx @lapointelabs/tripwire@latest scan --engines           # every installed engine
+npx @lapointelabs/tripwire@latest scan --engines semgrep,trufflehog
+npx @lapointelabs/tripwire@latest engines                  # what is available, and what is missing
+```
+
+| Engine | Domain | What it adds that Tripwire cannot do |
+| --- | --- | --- |
+| **Opengrep** / **Semgrep** | Code | Interprocedural and cross-file dataflow — the gap named in [Limits](#limits) |
+| **TruffleHog** | Secrets | **Verification.** Calls the issuer to ask whether the key is live |
+| **Gitleaks** | Secrets | Offline detection, for air-gapped agents where verification is unwanted |
+| **osv-scanner** | Dependencies | Every ecosystem's advisories from one binary and one database |
+| **Snyk Code** | Code | Commercial SAST · BYOK, `SNYK_TOKEN` |
+| **Snyk Agent Scan** | Agent surface | Inspects the MCP servers and skills your agent actually loads |
+| **agnix** | Agent instructions | 440+ rules validating `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, hooks, MCP config |
+
+`tripwire engines` prints the full inventory — including engines you have *not* installed
+and what each would have covered — because the useful question is what is going unchecked.
+
+**Nothing is bundled, downloaded, or auto-installed.** Tripwire runs binaries you already
+have. Commercial engines authenticate with your key from your environment; Tripwire reads
+no key file, writes no key, and proxies nothing through any service of ours.
+
+### What the harness actually adds
+
+Running these five tools by hand is five configs and five output formats. Tripwire's claim
+is not that it types the commands for you:
+
+**One finding model.** Every engine's severity and confidence is normalized onto the same
+four levels and the same three confidence tiers, then scored by the same function. A
+Semgrep rule tagged `LOW CONFIDENCE` and a Tripwire pattern match of low confidence weigh
+the same, because they mean the same thing.
+
+**Overlap is reconciled, not concatenated.** Two engines and a native rule landing on one
+line collapse into a single finding — the most authoritative one — which then records who
+else agreed:
+
+```
+      app.js:6
+        Command string is assembled from a variable before reaching a shell.
+        exec("ping -c 1 " + req.query.host, (err, out) => res.send(out));
+        confirmed by Semgrep / Opengrep
+    injection/command-execution
+```
+
+Authority is explicit: a **verified** credential outranks everything, a published advisory
+outranks a pattern match, and a Tripwire rule with an `explain` entry listing its known
+false positives outranks an external engine's uncertain guess. Independent agreement lifts
+a low-confidence finding to medium — it is evidence, not proof, and it stops there.
+
+**Uncertain external findings go through the same triage layer.** Semgrep emits most of
+its rules at `error` level while marking them `LOW CONFIDENCE`; run raw, those land in your
+report as settled fact. Here they are routed to the model pass like any other lead. High
+confidence findings are never sent, and neither are secrets or advisories — see below.
+
+**Provenance survives.** Every external finding carries its engine and that engine's own
+rule id into the terminal output, `findings.json`, the SARIF upload, and the fix plan's
+**Reported by** line. A finding nobody can trace is a finding nobody can argue with.
+
+**Absence is reported.** Domains no engine covered are named, with what Tripwire's own
+coverage of them amounts to:
+
+```
+  Engines: semgrep 4 · trufflehog 1*
+  * authenticated with your own key from the environment
+  2 duplicate findings collapsed where engines agreed on the same line.
+  Dependencies had no engine — Tripwire's own coverage is supply-chain posture only,
+  no advisory database.
+```
+
+### Secrets never reach a model
+
+The triage layer sends uncertain findings to a model. Any file that *any* source — a
+Tripwire rule, TruffleHog, or Gitleaks — flagged as holding a credential is excluded from
+that entirely. Shipping a file to a third-party API in the course of reporting that its
+contents leaked would make the tool the incident it is describing.
+
+For the same reason, no engine's raw secret value reaches the report. Evidence is the
+redacted form or the detector name; the value is never printed into a fix plan or a CI log.
+
+### One config file
+
+```json
+{
+  "engines": {
+    "semgrep": { "config": "p/ci", "limit": 200 },
+    "trufflehog": { "args": ["--exclude-paths", ".trufflehogignore"] },
+    "gitleaks": false
+  },
+  "scan": { "engines": "auto", "failOn": "high" }
+}
+```
+
+`tripwire.config.json` at the project root, or `.tripwire.json`. Every value has a working
+default and the file is entirely optional. Unknown keys are reported rather than ignored —
+a setting that silently does nothing is how people conclude a setting does not work.
+
+### Air-gapped and CI
+
+```sh
+npx @lapointelabs/tripwire@latest scan --engines --offline
+```
+
+`--offline` refuses any engine that needs the network and disables credential verification,
+so a secret reported under it was matched by shape rather than confirmed against its issuer
+— and the report says exactly that. Engines are opt-in for the same reason `--audit` is: a
+scanner that quietly makes network calls cannot be run on an air-gapped build agent.
+
+**Tripwire never passes `--dangerously-run-mcp-servers`** to Snyk Agent Scan. That flag
+executes every command in an MCP config, which is the correct way to inspect a live server
+and an indefensible thing for a security scanner to do to you unasked. Repository config
+paths are passed explicitly, so the tool inspects this project rather than sweeping your
+home directory.
+
 ## Dependency vulnerabilities
 
-Tripwire does not ship an advisory database. Instead `--audit` runs the auditor your
-ecosystem already maintains and folds its results into the same report and fix plan:
+Tripwire does not ship an advisory database. `--engines` prefers **osv-scanner** when it is
+installed — one binary, every ecosystem. `--audit` is the no-install path: it runs the
+auditor your ecosystem already maintains, which ships with the toolchain you already have.
 
 ```sh
 npx @lapointelabs/tripwire@latest scan --audit
@@ -253,6 +379,17 @@ Framework detection gates rules rather than guessing. A project with no model SD
     sarif_file: .tripwire/tripwire.sarif
 ```
 
+With engines, install the ones you want and pass `--engines` — the SARIF upload carries
+each finding's originating engine and rule id in its properties, so a dashboard entry stays
+traceable to the tool that raised it:
+
+```yaml
+- run: pipx install semgrep && brew install trufflehog osv-scanner
+- run: npx @lapointelabs/tripwire scan --project all --engines --fail-on high --no-ai --out .tripwire
+  env:
+    SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional — unlocks cross-file analysis
+```
+
 `--fail-on` accepts `critical`, `high`, `medium`, or `low`. Without it, Tripwire always exits 0 — a scanner that breaks the build on day one gets removed from the build on day two.
 
 ## Options
@@ -266,6 +403,7 @@ tripwire skills install     Install Tripwire as a skill for your coding agents.
 tripwire skills list        Show which agent harnesses were detected.
 tripwire rules              List every rule.
 tripwire providers          List model providers for the triage layer.
+tripwire engines            List external scan engines and what each one covers.
 
   --scope changed|all       Report only findings in changed files. Default: all.
   --base REF                Base for --scope changed. Default: merge-base with trunk.
@@ -284,6 +422,9 @@ tripwire providers          List model providers for the triage layer.
   --base-url URL            For self-hosted or proxied endpoints.
   --budget N                Maximum findings to send for triage. Default: 250.
   --no-ai                   Skip triage and report pattern confidence only.
+  --engines [LIST]          Run external engines. Bare: auto (every installed one).
+                            Also: all, none, or semgrep,trufflehog,osv-scanner…
+  --offline                 Refuse engines needing the network; no secret verification.
   --harness LIST            claude, cursor, copilot, agents. Default: detected.
   --force                   Overwrite a skill file Tripwire did not write.
 ```
@@ -305,9 +446,11 @@ Bands: 90+ Healthy · 75–89 Good · 60–74 Needs work · 40–59 At risk · b
 
 ## Limits
 
-Tripwire reads source text; it does not run your program. It cannot see values that arrive at runtime, configuration applied at deploy time, or a framework's implicit protections. It does not do interprocedural dataflow — a tainted value laundered through three helper functions in three files will be missed.
+Tripwire reads source text; it does not run your program. It cannot see values that arrive at runtime, configuration applied at deploy time, or a framework's implicit protections. Its own rules do not do interprocedural dataflow — a tainted value laundered through three helper functions in three files will be missed. That specific gap is why [Semgrep or Opengrep](#external-engines) is the first engine in the table; with `--engines` it is covered by a tool built for it, and the report says which.
 
 **The absence of a finding is not evidence of the absence of a bug.** Tripwire is a fast, broad first pass that tells you what it checked and how sure it is. It is not a replacement for a security review of code that handles money, credentials, or personal data.
+
+**Without engines, several domains are shallow by design** — fourteen token patterns and no verification for secrets, posture checks and no advisory database for dependencies, nothing at all for the MCP and skill surface. `tripwire engines` prints that inventory whether or not you run them, because knowing what went unchecked is the point.
 
 ## License
 
