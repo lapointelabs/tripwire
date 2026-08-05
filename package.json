@@ -1,7 +1,7 @@
 {
   "name": "@lapointelabs/tripwire",
   "version": "0.1.0",
-  "description": "Security and agent-safety scanner. Finds injection sinks, prompt-injection surfaces, misleading comments that misdirect AI agents, and structural rot — then writes a fix plan an agent can execute.",
+  "description": "Security scan for Claude Code, Cursor, and coding agents — injection sinks, secrets, prompt-injection surfaces, and repo lies that mislead LLMs.",
   "type": "module",
   "bin": {
     "tripwire": "bin/tripwire.js"
@@ -24,15 +24,21 @@
     "node": ">=20.1"
   },
   "keywords": [
-    "security",
-    "sast",
-    "static-analysis",
-    "prompt-injection",
-    "sql-injection",
-    "code-scanning",
     "agents",
     "claude",
-    "monorepo"
+    "claude-code",
+    "cli",
+    "code-scanning",
+    "coding-agents",
+    "cursor",
+    "llm",
+    "monorepo",
+    "prompt-injection",
+    "sast",
+    "security",
+    "security-scan",
+    "sql-injection",
+    "static-analysis"
   ],
   "repository": {
     "type": "git",

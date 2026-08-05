@@ -1,8 +1,8 @@
-# Tripwire
+# Security scan for Claude Code and Cursor
 
-Tripwire scans a codebase for the things that hurt your users and the things that mislead your agents, then writes a fix plan a coding agent can execute.
+A security scan for Claude Code, Cursor, and coding agents. Tripwire finds injection sinks, committed credentials, unsafe web defaults, and the ways a repository lies to the model reading it — then writes a fix plan an agent can execute.
 
-It finds injection sinks, committed credentials, and unsafe web defaults — the usual scanner territory. It also finds a category most scanners have no concept of: **the ways a repository lies to the model reading it.** Prompt-injection surfaces, model output flowing into a shell, tool descriptions assembled from runtime data, doc blocks that disagree with their function signature, and `CLAUDE.md` files pointing at scripts that no longer exist.
+It covers the usual scanner territory and a category most scanners miss: **prompt-injection surfaces, model output flowing into a shell, tool descriptions assembled from runtime data, doc blocks that disagree with their function signature, and `CLAUDE.md` files pointing at scripts that no longer exist.**
 
 Created by [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. Requires Node.js 20.1+.
 
