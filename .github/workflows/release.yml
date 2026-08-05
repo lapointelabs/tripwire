@@ -19,8 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Required for npm trusted publishing (OIDC). This is what removes the need to
-      # store a long-lived npm token as a repository secret at all.
+      # Required for npm trusted publishing (OIDC), which removes the need to store a
+      # long-lived token. Note that OIDC cannot perform a package's *first* publish —
+      # npm will not let you register a trusted publisher until the package exists — so
+      # the initial release runs on an NPM_TOKEN secret and the secret can be deleted
+      # once trusted publishing is configured.
       id-token: write
 
     steps:
@@ -71,10 +74,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
         run: npm publish
         env:
-          # Left unset when trusted publishing is configured for this package on npmjs.com
-          # — npm then authenticates with the OIDC token from `id-token: write` above.
-          # If you would rather use a classic token, add it as the NPM_TOKEN secret and it
-          # takes over automatically.
+          # Used when set, which is what the first publish requires. Once the package
+          # exists and a trusted publisher is registered for this repo and workflow on
+          # npmjs.com, delete the NPM_TOKEN secret and this resolves to empty — npm then
+          # authenticates with the OIDC token from `id-token: write` above, and there is
+          # no long-lived credential to leak or rotate.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish dry run
