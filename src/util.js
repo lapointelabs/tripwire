@@ -133,8 +133,12 @@ export function isIgnored(rules, relative, isDirectory) {
 export async function walkSourceFiles(root, options = {}) {
   const ignoreRules = options.ignoreRules || [];
   const extraIgnores = new Set(options.extraIgnores || []);
+  const excludePaths = (options.excludePaths || []).filter(Boolean).map((value) => path.resolve(value));
   const limit = options.limit || Infinity;
   const files = [];
+
+  const excluded = (absolute) => excludePaths.some((candidate) =>
+    absolute === candidate || absolute.startsWith(`${candidate}${path.sep}`));
 
   async function visit(directory) {
     if (files.length >= limit) return;
@@ -148,6 +152,7 @@ export async function walkSourceFiles(root, options = {}) {
       if (files.length >= limit) return;
       if (entry.isSymbolicLink()) continue;
       const absolute = path.join(directory, entry.name);
+      if (excluded(absolute)) continue;
       const relative = relativePath(root, absolute);
       if (entry.isDirectory()) {
         if (DEFAULT_IGNORES.has(entry.name) || extraIgnores.has(entry.name)) continue;

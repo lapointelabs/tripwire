@@ -3,10 +3,10 @@ import { ENGINES } from "./engines/catalog.js";
 import { readJson } from "./util.js";
 
 /**
- * One config file, because the alternative is five.
+ * One config file, because the alternative is one per engine.
  *
  * Assembling this stack by hand means a `.semgrepignore`, a TruffleHog exclusion file, an
- * osv-scanner config, a Snyk policy, and an agnix config — five files, five schemas, five
+ * osv-scanner config, a Snyk policy, and an agnix config — several files, schemas, and
  * places to look when a finding you suppressed comes back. Collapsing that is most of the
  * reason to run the engines through one harness rather than five CI steps.
  *
@@ -16,7 +16,7 @@ import { readJson } from "./util.js";
 
 const FILENAMES = ["tripwire.config.json", ".tripwire.json"];
 
-const SCAN_KEYS = new Set(["engines", "offline", "failOn", "only", "skip", "provider", "model", "budget", "audit", "out"]);
+const SCAN_KEYS = new Set(["engines", "offline", "failOn", "failOnNew", "baseline", "only", "skip", "provider", "model", "budget", "audit", "out", "importSarif"]);
 
 /**
  * Load config from the project root.

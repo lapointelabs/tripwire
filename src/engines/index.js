@@ -11,7 +11,7 @@ export { DOMAINS, ENGINES, engineById };
 /**
  * Running the external engines and folding their results into one report.
  *
- * The value Tripwire adds over running these five tools by hand is not that it types the
+ * The value Tripwire adds over running these tools by hand is not that it types the
  * commands for you. It is that afterwards there is one finding model, one confidence
  * scale, one score, one deduplicated list, and one fix plan — and a stated account of
  * which engines did not run and what therefore went unchecked.
@@ -55,8 +55,12 @@ export async function planEngines(context) {
       continue;
     }
 
-    if (context.offline && engine.network) {
-      plan.push({ engine, run: false, status: "offline", reason: `needs the network (${engine.networkReason}) and --offline was passed` });
+    const configuredNetworkArg = engine.networkArgs?.find((arg) => options.args?.includes(arg));
+    if (context.offline && (engine.network || configuredNetworkArg)) {
+      const reason = engine.network
+        ? engine.networkReason
+        : `configured argument ${configuredNetworkArg} enables a network analyzer`;
+      plan.push({ engine, run: false, status: "offline", reason: `needs the network (${reason}) and --offline was passed` });
       continue;
     }
 
@@ -265,10 +269,11 @@ export async function runEngines(context) {
  * sent either: the ecosystem already answered that question authoritatively. Everything
  * else follows the normal rule, where uncertainty is what buys a second opinion.
  */
-function toFinding(item, engine) {
-  const rule = ruleForDomain(engine.domain);
+export function toFinding(item, engine) {
+  const domain = item.domain || engine.domain;
+  const rule = ruleForDomain(domain);
   const confidence = item.confidence || "medium";
-  const triageable = engine.domain !== "secrets" && engine.domain !== "deps" && confidence !== "high";
+  const triageable = domain !== "secrets" && domain !== "deps" && confidence !== "high";
 
   return {
     id: `${rule.id}:${engine.id}:${item.file}:${item.line}:${item.externalRuleId}`,
@@ -298,6 +303,7 @@ function toFinding(item, engine) {
       engine: engine.id,
       label: engine.label,
       ruleId: item.externalRuleId,
+      domain,
       verified: item.verified,
       refs: item.refs || []
     }
@@ -312,7 +318,7 @@ function toFinding(item, engine) {
  * alone — it is the exact "wired-together" failure the engine layer exists to avoid.
  */
 function domainOf(finding) {
-  if (finding.source) return engineById(finding.source.engine)?.domain || "code";
+  if (finding.source) return finding.source.domain || engineById(finding.source.engine)?.domain || "code";
   const { ruleId } = finding;
   if (ruleId.startsWith("secrets/") || ruleId === "context/secret-in-agent-context") return "secrets";
   if (ruleId === "supply-chain/vulnerable-dependency") return "deps";

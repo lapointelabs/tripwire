@@ -14,12 +14,12 @@ const READ_CONCURRENCY = 24;
  * usable as a baseline in CI and as a diff between runs.
  */
 export async function scanProject(options) {
-  const { root, project, only = [], skip = [], onProgress = () => {}, maxFiles = 5000 } = options;
+  const { root, project, only = [], skip = [], onProgress = () => {}, maxFiles = 5000, excludePaths = [] } = options;
   const capabilities = capabilitiesOf(project);
 
   const gitignore = await readText(path.join(root, ".gitignore"));
   const ignoreRules = compileIgnorePatterns(gitignore);
-  const files = await walkSourceFiles(project.directory, { ignoreRules, limit: maxFiles });
+  const files = await walkSourceFiles(project.directory, { ignoreRules, limit: maxFiles, excludePaths });
 
   const fileSelection = selectRules(fileRules, { capabilities, only, skip });
   const projectSelection = selectRules(projectRules, { capabilities, only, skip });

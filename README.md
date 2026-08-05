@@ -1,12 +1,43 @@
-# Security scan for Claude Code and Cursor
+# Tripwire
 
-A security scan for Claude Code, Cursor, and coding agents. Tripwire finds injection sinks, committed credentials, unsafe web defaults, and the ways a repository lies to the model reading it — then writes a fix plan an agent can execute.
+<p align="center">
+  <img src="docs/assets/hero.svg" width="100%" alt="Tripwire combines native security rules and specialist engines into one report and agent-ready fix plan.">
+</p>
 
-It covers the usual scanner territory and a category most scanners miss: **prompt-injection surfaces, model output flowing into a shell, tool descriptions assembled from runtime data, doc blocks that disagree with their function signature, and `CLAUDE.md` files pointing at scripts that no longer exist.**
+<p align="center">
+  <a href="https://www.npmjs.com/package/@lapointelabs/tripwire"><img alt="npm version" src="https://img.shields.io/npm/v/@lapointelabs/tripwire?style=flat-square&amp;color=3157a4"></a>
+  <a href="https://github.com/lapointelabs/tripwire/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/lapointelabs/tripwire/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-237a46?style=flat-square"></a>
+  <img alt="Node.js 20.1 or newer" src="https://img.shields.io/badge/node-%E2%89%A520.1-3c873a?style=flat-square">
+</p>
 
-Where a specialist tool is better — cross-file dataflow, credential verification, advisory databases, MCP and skill inspection — Tripwire [runs that tool](#external-engines) rather than reimplementing it, and reconciles its findings into one report, one score, and one fix plan.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-it-produces">Visual report</a> ·
+  <a href="#external-engines">Engines</a> ·
+  <a href="#benchmarks">Benchmarks</a> ·
+  <a href="docs/enterprise.md">Enterprise adoption</a>
+</p>
 
-Created by [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. Requires Node.js 20.1+.
+Security scan for Claude Code, Cursor, and coding agents. Tripwire finds injection sinks,
+committed credentials, unsafe web defaults, and the ways a repository misleads the model
+reading it—then writes a fix plan an agent can execute.
+
+Alongside the usual scanner territory it covers a category most scanners miss:
+prompt-injection surfaces, model output flowing into a shell, tool descriptions assembled
+from runtime data, doc blocks that disagree with their signature, and `CLAUDE.md` files
+pointing at scripts that no longer exist.
+
+Where a specialist tool is better — cross-file dataflow, credential verification, advisory
+databases — Tripwire [runs that tool](#external-engines) instead of reimplementing it, and
+reconciles the output into one report, one score, and one fix plan.
+
+Two rules shape the output. **A rule that could not run is reported as gated, never as
+clean**, so a quiet report and a clean codebase never look the same. And **every finding
+carries a confidence level** that flows into the score, the report, and the fix plan;
+uncertain ones are labelled as leads and are the ones sent for review.
+
+By [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. Requires Node.js 20.1+.
 
 ## Quick start
 
@@ -14,7 +45,7 @@ Created by [Marc Lapointe](https://lapointelabs.com/about) at Lapointe Labs. Req
 npx @lapointelabs/tripwire scan
 ```
 
-In a monorepo, Tripwire detects every project and asks which to scan, grouped by stack:
+In a monorepo, every project is detected and grouped by stack:
 
 ```
   4 projects detected. Which should Tripwire scan?
@@ -28,17 +59,33 @@ In a monorepo, Tripwire detects every project and asks which to scan, grouped by
    a. all of them
 ```
 
-Pick one, or `--project all` to skip the prompt in CI.
+Pick one, or pass `--project all` to skip the prompt in CI.
+
+## How it works
+
+```mermaid
+flowchart LR
+    repo[Repository] --> native[Native rules]
+    repo --> engines[Installed specialist engines]
+    native --> reconcile[Normalize and deduplicate]
+    engines --> reconcile
+    reconcile --> triage[Optional BYO-model triage]
+    triage --> policy[Score and baseline policy]
+    policy --> html[Visual HTML report]
+    policy --> sarif[SARIF 2.1]
+    policy --> plan[Agent fix plan]
+```
+
+Tripwire owns the orchestration, evidence model, and policy layer. Specialist scanners keep
+owning the deep analysis they are best at.
 
 ## Use it as an agent skill
-
-Tripwire installs itself into whatever coding agents your repository already uses:
 
 ```sh
 npx @lapointelabs/tripwire@latest skills install
 ```
 
-It detects which harnesses are configured and writes only those:
+Only the harnesses your repository already uses get written:
 
 | Harness | File |
 | --- | --- |
@@ -47,290 +94,51 @@ It detects which harnesses are configured and writes only those:
 | GitHub Copilot, VS Code | `.github/instructions/tripwire.instructions.md` |
 | Codex, Amp, Jules, Zed, and others | `AGENTS.md` |
 
-`skills list` shows what was detected; `--harness claude,cursor` targets specific ones.
-An existing `AGENTS.md` is appended to inside HTML comment markers, so your own
-instructions survive and a reinstall replaces Tripwire's section in place rather than
-stacking copies. A skill you wrote by hand is never overwritten without `--force`.
+Claude Code and Cursor get a bundle rather than a passive rule file: `SKILL.md` plus
+`references/triage.md` (the scan → triage → fix → verify loop) and `references/rules.md`
+(generated from the live rule set). Only the frontmatter description sits in context — the
+body loads on invocation, the references only if the agent needs them. Both set
+`disable-model-invocation: true`, so they run on `/tripwire` or a request to scan, not on
+every turn. The playbook ships inside the package rather than being fetched, so it works
+offline and behind a restrictive proxy.
 
-**Claude Code and Cursor get a skill bundle**, not a passive rule file:
-
-```
-.cursor/skills/tripwire/
-├── SKILL.md                 # short: prerequisites, commands, when to escalate
-└── references/
-    ├── triage.md            # the full scan → triage → fix → verify loop
-    └── rules.md             # every rule, generated from the live rule set
-```
-
-Only the frontmatter description sits in context by default. The body loads when the
-skill is invoked, and the references load only if the agent needs them — so a full triage
-workflow costs nothing until someone asks for one. Both declare
-`disable-model-invocation: true`, matching the convention for scanner skills: they run
-when you type `/tripwire` or ask for a scan, not ambiently on every turn.
-
-The playbook ships inside the package rather than being fetched from a server. `@latest`
-already resolves the current version, so the content stays current without a reinstall,
-and it works offline, in air-gapped CI, and behind a proxy that blocks outbound fetches.
-
-**Install it once for every project** rather than per repository:
+An existing `AGENTS.md` is appended to inside HTML comment markers, so your instructions
+survive and a reinstall replaces Tripwire's section in place. A hand-written skill is never
+overwritten without `--force`.
 
 ```sh
-npx @lapointelabs/tripwire@latest skills install --harness cursor --root ~
+tripwire skills list                                    # what was detected
+tripwire skills install --harness claude,cursor         # target specific harnesses
+tripwire skills install --harness cursor --root ~       # once for every project
+tripwire skills install --command "pnpm tripwire"       # pin the invocation
 ```
-
-**Pin the invocation** when the package is a devDependency rather than fetched by `npx`:
-
-```sh
-npx @lapointelabs/tripwire@latest skills install --command "pnpm tripwire"
-```
-
-## Regression checks
-
-`--scope changed` reports only findings in files you touched, compared against the
-merge-base with your trunk branch plus anything uncommitted:
-
-```sh
-npx @lapointelabs/tripwire@latest scan --scope changed
-npx @lapointelabs/tripwire@latest scan --scope changed --score   # just the number
-```
-
-Scope narrows what is **reported**, never what is analysed. Rules that need whole-project
-context — unused exports, cross-file duplication, stale instruction references — still run
-against the entire tree; you simply are not shown findings in code you did not write. Use
-`--base <ref>` to pin the comparison point.
-
-## Why this exists
-
-Static analysis has a credibility problem: tools report a thousand pattern matches, developers learn the output is mostly noise, and the three findings that mattered get skimmed past with the rest. Tripwire is built around two commitments meant to fix that.
-
-**Say what you did not check.** A rule that could not run is reported as gated, never as clean. If no database driver is in the manifest, the SQL rules are listed as skipped rather than silently passing. If no model triage ran, low-confidence findings are labelled as leads, not conclusions. A quiet report and a clean codebase should never look the same.
-
-**Make uncertainty a first-class field.** Every finding carries a confidence level that flows into the score, the report, and the fix plan. Certain findings are stated plainly; uncertain ones say so, and are the ones sent for review.
-
-## The two-layer engine
-
-**Layer 1 — deterministic.** Runs with no API key. A lexical pass blanks comments and string bodies while preserving byte offsets, so rules match real code instead of their own examples in a docstring. Loop and function bodies are found by brace and indent matching, so "await inside a loop" means inside the body, not within twenty lines of a `for`.
-
-**Layer 2 — your model, optional.** Uncertain findings are batched and sent to a model you choose, which confirms or refutes each one against the surrounding source. Refuted findings drop out of the score and move to their own section. High-confidence findings are never sent, so cost tracks ambiguity rather than repository size.
-
-```sh
-export ANTHROPIC_API_KEY=...
-npx @lapointelabs/tripwire scan               # picks up the key automatically
-
-npx @lapointelabs/tripwire scan --provider ollama --model qwen2.5-coder   # fully local
-npx @lapointelabs/tripwire scan --no-ai                                   # pattern confidence only
-```
-
-`tripwire providers` shows what is configured. Supported:
-
-| Provider | Key | SDK | Shape |
-| --- | --- | --- | --- |
-| `anthropic` | `ANTHROPIC_API_KEY` | `@anthropic-ai/sdk` | Chat endpoint |
-| `openai` | `OPENAI_API_KEY` | `openai` | Chat endpoint (any OpenAI-compatible URL) |
-| `cursor` | `CURSOR_API_KEY` | `@cursor/sdk` *(optional peer)* | Cloud agent |
-| `ollama` | none | `ollama` | Local chat endpoint |
-
-Every provider goes through its vendor's official SDK rather than hand-rolled HTTP. Model
-APIs drift — parameters get removed, auth changes, new stop reasons appear — and an SDK
-absorbs that in a version bump instead of a silent breakage this project has to chase. The
-SDKs also own retry, backoff, and timeout handling. They are imported lazily, so a scan
-that never triages pays none of the load cost.
-
-**Cursor's SDK is an optional peer, not a dependency.** It currently pulls a high-severity
-transitive advisory (`@connectrpc/connect-node` → `undici`, no fix available). Forcing that
-on everyone who installs a security scanner would break `npm audit` in their CI, so it is
-opt-in:
-
-```sh
-npm install @cursor/sdk
-```
-
-Without it, `--provider cursor` reports what to install and the scan continues on pattern
-confidence rather than failing. `--base-url` covers self-hosted and proxied gateways.
-
-**Cursor works differently from the others.** Its API launches agents; there is no chat
-endpoint to post a prompt to. Each triage batch therefore runs as a **no-repo cloud
-agent** — created with the prompt, polled until its run reaches a terminal state, then
-read from `result`. No repository is attached, nothing is cloned, no branch or pull
-request is created. Expect it to be slower per batch than a chat provider, so Tripwire
-sends larger batches at lower concurrency and allows minutes rather than seconds.
-
-Files the deterministic pass flagged as containing a credential are never sent to any model.
-
-## External engines
-
-Tripwire does not try to out-depth the specialists. For an advisory database, 800 secret
-detectors, or a cross-file dataflow engine, a generalist scanner reimplementing the thing
-badly is worse than no coverage at all — a shallow pass that reports nothing reads exactly
-like a clean one.
-
-So it runs them instead, and folds their output into one report:
-
-```sh
-npx @lapointelabs/tripwire@latest scan --engines           # every installed engine
-npx @lapointelabs/tripwire@latest scan --engines semgrep,trufflehog
-npx @lapointelabs/tripwire@latest engines                  # what is available, and what is missing
-```
-
-| Engine | Domain | What it adds that Tripwire cannot do |
-| --- | --- | --- |
-| **Opengrep** / **Semgrep** | Code | Interprocedural and cross-file dataflow — the gap named in [Limits](#limits) |
-| **TruffleHog** | Secrets | **Verification.** Calls the issuer to ask whether the key is live |
-| **Gitleaks** | Secrets | Offline detection, for air-gapped agents where verification is unwanted |
-| **osv-scanner** | Dependencies | Every ecosystem's advisories from one binary and one database |
-| **Snyk Code** | Code | Commercial SAST · BYOK, `SNYK_TOKEN` |
-| **Snyk Agent Scan** | Agent surface | Inspects the MCP servers and skills your agent actually loads |
-| **agnix** | Agent instructions | 440+ rules validating `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, hooks, MCP config |
-
-`tripwire engines` prints the full inventory — including engines you have *not* installed
-and what each would have covered — because the useful question is what is going unchecked.
-
-**Nothing is bundled, downloaded, or auto-installed.** Tripwire runs binaries you already
-have. Commercial engines authenticate with your key from your environment; Tripwire reads
-no key file, writes no key, and proxies nothing through any service of ours.
-
-### What the harness actually adds
-
-Running these five tools by hand is five configs and five output formats. Tripwire's claim
-is not that it types the commands for you:
-
-**One finding model.** Every engine's severity and confidence is normalized onto the same
-four levels and the same three confidence tiers, then scored by the same function. A
-Semgrep rule tagged `LOW CONFIDENCE` and a Tripwire pattern match of low confidence weigh
-the same, because they mean the same thing.
-
-**Overlap is reconciled, not concatenated.** Two engines and a native rule landing on one
-line collapse into a single finding — the most authoritative one — which then records who
-else agreed:
-
-```
-      app.js:6
-        Command string is assembled from a variable before reaching a shell.
-        exec("ping -c 1 " + req.query.host, (err, out) => res.send(out));
-        confirmed by Semgrep / Opengrep
-    injection/command-execution
-```
-
-Authority is explicit: a **verified** credential outranks everything, a published advisory
-outranks a pattern match, and a Tripwire rule with an `explain` entry listing its known
-false positives outranks an external engine's uncertain guess. Independent agreement lifts
-a low-confidence finding to medium — it is evidence, not proof, and it stops there.
-
-**Uncertain external findings go through the same triage layer.** Semgrep emits most of
-its rules at `error` level while marking them `LOW CONFIDENCE`; run raw, those land in your
-report as settled fact. Here they are routed to the model pass like any other lead. High
-confidence findings are never sent, and neither are secrets or advisories — see below.
-
-**Provenance survives.** Every external finding carries its engine and that engine's own
-rule id into the terminal output, `findings.json`, the SARIF upload, and the fix plan's
-**Reported by** line. A finding nobody can trace is a finding nobody can argue with.
-
-**Absence is reported.** Domains no engine covered are named, with what Tripwire's own
-coverage of them amounts to:
-
-```
-  Engines: semgrep 4 · trufflehog 1*
-  * authenticated with your own key from the environment
-  2 duplicate findings collapsed where engines agreed on the same line.
-  Dependencies had no engine — Tripwire's own coverage is supply-chain posture only,
-  no advisory database.
-```
-
-### Secrets never reach a model
-
-The triage layer sends uncertain findings to a model. Any file that *any* source — a
-Tripwire rule, TruffleHog, or Gitleaks — flagged as holding a credential is excluded from
-that entirely. Shipping a file to a third-party API in the course of reporting that its
-contents leaked would make the tool the incident it is describing.
-
-For the same reason, no engine's raw secret value reaches the report. Evidence is the
-redacted form or the detector name; the value is never printed into a fix plan or a CI log.
-
-### One config file
-
-```json
-{
-  "engines": {
-    "semgrep": { "config": "p/ci", "limit": 200 },
-    "trufflehog": { "args": ["--exclude-paths", ".trufflehogignore"] },
-    "gitleaks": false
-  },
-  "scan": { "engines": "auto", "failOn": "high" }
-}
-```
-
-`tripwire.config.json` at the project root, or `.tripwire.json`. Every value has a working
-default and the file is entirely optional. Unknown keys are reported rather than ignored —
-a setting that silently does nothing is how people conclude a setting does not work.
-
-### Air-gapped and CI
-
-```sh
-npx @lapointelabs/tripwire@latest scan --engines --offline
-```
-
-`--offline` refuses any engine that needs the network and disables credential verification,
-so a secret reported under it was matched by shape rather than confirmed against its issuer
-— and the report says exactly that. Engines are opt-in for the same reason `--audit` is: a
-scanner that quietly makes network calls cannot be run on an air-gapped build agent.
-
-**Tripwire never passes `--dangerously-run-mcp-servers`** to Snyk Agent Scan. That flag
-executes every command in an MCP config, which is the correct way to inspect a live server
-and an indefensible thing for a security scanner to do to you unasked. Repository config
-paths are passed explicitly, so the tool inspects this project rather than sweeping your
-home directory.
-
-## Dependency vulnerabilities
-
-Tripwire does not ship an advisory database. `--engines` prefers **osv-scanner** when it is
-installed — one binary, every ecosystem. `--audit` is the no-install path: it runs the
-auditor your ecosystem already maintains, which ships with the toolchain you already have.
-
-```sh
-npx @lapointelabs/tripwire@latest scan --audit
-```
-
-| Ecosystem | Command run | Needs installing |
-| --- | --- | --- |
-| npm / pnpm / yarn | `npm audit`, `pnpm audit`, `yarn npm audit` — chosen by lockfile | ships with the manager |
-| .NET | `dotnet list package --vulnerable --include-transitive` | ships with the SDK |
-| Python | `pip-audit` | `pip install pip-audit` |
-| Go | `govulncheck -json ./...` | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
-| Rust | `cargo audit --json` | `cargo install cargo-audit` |
-
-**govulncheck findings carry reachability.** A vulnerable function you never call is
-reported at low severity and labelled as such, while one your code actually reaches is
-high — the distinction is the reason to run it rather than diff a lockfile. Rust
-advisories are reported at high, and `cargo audit`'s informational warnings
-(unmaintained, unsound) at low, so a crate that merely stopped being updated does not
-drown the real advisory.
-
-A missing auditor names the command that installs it, including when the binary exists
-but the subcommand does not (`cargo` without `cargo-audit`).
-
-It is opt-in because it is the only part of a scan that spawns a subprocess and reaches
-the network — a scanner that quietly makes network calls cannot be run on an air-gapped
-build agent. When it has not run, the report says so rather than leaving a clean-looking
-silence. A missing tool, an unrestored .NET project, or an offline registry degrades to a
-stated reason and never fails the scan.
 
 ## What it produces
 
-Nothing is written into your repository. The terminal output is the primary read; artifacts
-land in a cache directory outside the tree, and the scan prints the path:
+Nothing is written into your repository by default. The terminal output is the primary
+read; artifacts land in a cache directory outside the tree and the scan prints the path.
+
+<p align="center">
+  <img src="docs/assets/report-preview.svg" width="100%" alt="Example Tripwire HTML report showing its score, severity and category charts, coverage status, and filterable findings.">
+</p>
+
+<p align="center"><sub>Real output from the bundled vulnerable fixture · deterministic scan · no external engines or model triage</sub></p>
 
 | File | When | Purpose |
 | --- | --- | --- |
-| `FIX_PLAN.md` | always | **The one to hand an agent.** One task per finding, ordered by severity, each with its own acceptance criteria. |
-| `findings.json` | always | Machine-readable, including refuted findings and their reasons. |
-| `report.md` | `--out` | The long-form human read: evidence, triage notes, and what was not covered. |
+| `FIX_PLAN.md` | always | **The one to hand an agent.** One task per finding, ordered by severity, each with acceptance criteria. |
+| `findings.json` | always | Machine-readable, including refuted findings and why. |
+| `report.md` | `--out` | Long-form read: evidence, triage notes, what was not covered. |
+| `report.html` | `--out` | Self-contained visual report with severity, coverage, baseline, and finding filters. |
 | `tripwire.sarif` | `--out` | SARIF 2.1.0 for GitHub code scanning. |
 
-Two files by default, because only two get read — the terminal already covers what
-`report.md` says, and SARIF matters only to a CI uploader. `--out DIR` writes all four
-wherever you point it, and is the only way anything lands inside the repository.
+`--out DIR` writes all five, and is the only way anything lands inside the repository.
+When several projects are scanned, each gets a directory under `DIR` matching its project
+path, so one project's artifacts never overwrite another's.
 
-`FIX_PLAN.md` is written to be pasted into a coding agent and worked top to bottom. It opens with a protocol that closes the loopholes an agent reaches for under pressure — no suppression comments, no scanner-dodging renames, no blanket refactors, and no marking a credential fixed when only the line was deleted and the key was never rotated. Every task states what must be true when it is done:
+`FIX_PLAN.md` opens with a protocol closing the loopholes an agent reaches for under
+pressure — no suppression comments, no scanner-dodging renames, no blanket refactors, no
+marking a credential fixed when the line was deleted and the key never rotated:
 
 ```markdown
 ### 1. [ ] SQL built by string interpolation — `src/api.js:11`
@@ -344,19 +152,38 @@ wherever you point it, and is the only way anything lands inside the repository.
 - [ ] No ignore comment, rule disable, or scanner-dodging rename was used.
 ```
 
-Marking a task `[~] not applicable` with a reason is an explicitly correct outcome. An agent that reads a finding, decides it is wrong, and says why is doing the job — a plan that only permits "fixed" teaches agents to force changes into code that was already fine.
+Marking a task `[~] not applicable` with a reason is an explicitly correct outcome. A plan
+that only permits "fixed" teaches agents to force changes into code that was already fine.
 
 ## Rule packs
 
 `tripwire rules` lists all of them.
 
-**Security** — SQL, command, and NoSQL injection; runtime code evaluation and unsafe deserialization; path traversal; raw HTML sinks; permissive CORS; disabled TLS verification; fast hashes on credentials; predictable randomness for secrets; unvalidated redirects; committed credentials across fourteen vendor token formats.
+**Security** — SQL, command, and NoSQL injection; runtime code evaluation and unsafe
+deserialization; path traversal; raw HTML sinks; permissive CORS; disabled TLS
+verification; fast hashes on credentials; predictable randomness for secrets; unvalidated
+redirects; committed credentials across fourteen vendor token formats.
 
-**Agent safety** — external data spliced into prompts without a data/instruction boundary; model output reaching a shell, query, or filesystem; tool descriptions assembled at runtime; disabled agent permission gates; secrets interpolated into prompt text; instruction-override phrasing committed into source or into a `CLAUDE.md`; doc blocks that disagree with their signature; comments contradicting the code beneath them; instruction files referencing paths and npm scripts that do not exist.
+**Agent safety** — external data spliced into prompts without a data/instruction boundary;
+model output reaching a shell, query, or filesystem; tool descriptions assembled at
+runtime; disabled agent permission gates; secrets interpolated into prompt text;
+instruction-override phrasing in source or in a `CLAUDE.md`; doc blocks that disagree with
+their signature; comments contradicting the code beneath them; instruction files
+referencing paths and npm scripts that do not exist.
 
-**Supply chain** — missing or uncommitted lockfiles; dependencies pinned to `*`/`latest` or to a movable git ref; unrestricted dependency install scripts; registries reached over plain HTTP or with certificate checks disabled; CI actions pinned to mutable tags rather than commit SHAs; NuGet feeds without package source mapping; unpinned Python requirements and `--extra-index-url` dependency-confusion exposure.
+**Supply chain** — missing or uncommitted lockfiles; dependencies pinned to `*`/`latest` or
+to a movable git ref; unrestricted install scripts; registries over plain HTTP or with
+certificate checks disabled; CI actions pinned to mutable tags rather than commit SHAs;
+NuGet feeds without package source mapping; unpinned Python requirements and
+`--extra-index-url` dependency-confusion exposure.
 
-**Correctness, maintainability, performance** — silently discarded errors; monolith files; oversized functions; deep nesting; long parameter lists; unused exports; cross-file duplication; sequential awaits and linear lookups inside loops.
+**Correctness, maintainability, performance** — silently discarded errors; monolith files;
+oversized functions; deep nesting; long parameter lists; unused exports; cross-file
+duplication; sequential awaits and linear lookups inside loops.
+
+`tripwire explain RULE` prints what a rule matches, why it matters, what "done" looks like,
+**and the shapes it is known to get wrong**, so an agent judging a false positive has
+something concrete to check against.
 
 ## Language support
 
@@ -368,34 +195,258 @@ Marking a task `[~] not applicable` with a reason is an explicitly correct outco
 | Python | `pyproject.toml`, `requirements.txt` | Full |
 | Go, Rust, Ruby, PHP, Java | `go.mod`, `Cargo.toml`, `Gemfile`, `composer.json`, `pom.xml` | Security and structure |
 
-Framework detection gates rules rather than guessing. A project with no model SDK in its manifest does not get prompt-injection findings, and the report says so.
+Framework detection gates rules rather than guessing. A project with no model SDK in its
+manifest does not get prompt-injection findings, and the report says so.
+
+## Triage with your own model
+
+The deterministic pass runs with no API key. It blanks comments and string bodies while
+preserving byte offsets, so rules match real code rather than their own examples in a
+docstring, and it finds loop and function bodies by brace and indent matching.
+
+Optionally, uncertain findings are then batched to a model you choose, which confirms or
+refutes each against the surrounding source. Refuted findings drop out of the score into
+their own section. High-confidence findings are never sent, so cost tracks ambiguity rather
+than repository size.
+
+```sh
+export ANTHROPIC_API_KEY=...
+npx @lapointelabs/tripwire scan                                           # picks up the key
+
+npx @lapointelabs/tripwire scan --provider ollama --model qwen2.5-coder   # fully local
+npx @lapointelabs/tripwire scan --no-ai                                   # patterns only
+```
+
+`tripwire providers` shows what is configured.
+
+| Provider | Key | SDK | Shape |
+| --- | --- | --- | --- |
+| `anthropic` | `ANTHROPIC_API_KEY` | `@anthropic-ai/sdk` | Chat endpoint |
+| `openai` | `OPENAI_API_KEY` | `openai` | Chat endpoint (any OpenAI-compatible URL) |
+| `cursor` | `CURSOR_API_KEY` | `@cursor/sdk` *(optional peer)* | Cloud agent |
+| `ollama` | none | `ollama` | Local chat endpoint |
+
+Each provider goes through its vendor's official SDK, which owns retry, backoff, timeouts,
+and API drift. They are imported lazily, so a scan that never triages pays no load cost.
+`--base-url` covers self-hosted and proxied gateways.
+
+**Cursor's SDK is an optional peer** (`npm install @cursor/sdk`), because it pulls a
+high-severity transitive advisory (`@connectrpc/connect-node` → `undici`, no fix available)
+that would break `npm audit` for everyone installing a security scanner. Without it,
+`--provider cursor` reports what to install and continues on pattern confidence. Cursor
+launches agents rather than exposing a chat endpoint, so each batch runs as a no-repo cloud
+agent: nothing is cloned, no branch or PR is created, and batches are larger at lower
+concurrency because it is slower per call.
+
+**Files flagged as containing a credential are never sent to any model.**
+
+## External engines
+
+Tripwire does not try to out-depth the specialists. A generalist reimplementing an advisory
+database or a dataflow engine badly is worse than no coverage, because a shallow pass that
+reports nothing reads exactly like a clean one.
+
+```sh
+npx @lapointelabs/tripwire@latest scan --engines           # every installed engine
+npx @lapointelabs/tripwire@latest scan --engines semgrep,trufflehog
+npx @lapointelabs/tripwire@latest engines                  # available, and missing
+```
+
+| Engine | Domain | What it adds |
+| --- | --- | --- |
+| **Opengrep** / **Semgrep** | Code | Interprocedural and cross-file dataflow — the gap named in [Limits](#limits) |
+| **ProofLayer Full Scanner** | Code and agent surface | AST, taint, cross-file, MCP, and package-hallucination checks |
+| **TruffleHog** | Secrets | **Verification.** Calls the issuer to ask whether the key is live |
+| **Gitleaks** | Secrets | Offline detection, where verification is unwanted |
+| **osv-scanner** | Dependencies | Every ecosystem's advisories from one binary |
+| **Snyk Code** | Code | Commercial SAST · BYOK, `SNYK_TOKEN` |
+| **Snyk Agent Scan** | Agent surface | Inspects the MCP servers and skills your agent loads |
+| **Cisco AI Defense Skill Scanner** | Agent skills | Static, YARA, bytecode, pipeline, and behavioral dataflow analysis |
+| **agnix** | Agent instructions | 440+ rules for `CLAUDE.md`, `AGENTS.md`, `SKILL.md`, hooks, MCP config |
+
+Nothing is bundled, downloaded, or auto-installed — Tripwire runs binaries you already
+have, and commercial engines authenticate with your key from your environment. `tripwire
+engines` lists engines you have *not* installed and what each would have covered, because
+the useful question is what is going unchecked.
+
+Tools that already emit SARIF—most notably CodeQL—can be folded into the same normalized
+report without Tripwire trying to own their build or database setup:
+
+```sh
+tripwire scan --import-sarif codeql-results.sarif --out .tripwire --no-ai
+```
+
+`--import-sarif` is repeatable. An invalid or missing report fails closed, while an optional
+engine that is merely unavailable still degrades to a named coverage gap.
+
+What the harness adds over running the tools by hand:
+
+- **One finding model.** Every engine's severity and confidence is normalized onto the same
+  four levels and three confidence tiers, then scored by the same function.
+- **Overlap is reconciled, not concatenated.** Two engines and a native rule on one line
+  collapse into the most authoritative finding, which records who else agreed. A *verified*
+  credential outranks everything, an advisory outranks a pattern match, and a rule with a
+  documented false-positive list outranks an external guess. Agreement lifts low confidence
+  to medium and stops there.
+- **Uncertain external findings hit the same triage layer.** Semgrep emits most rules at
+  `error` while marking them `LOW CONFIDENCE`; run raw, those land as settled fact.
+- **Provenance survives** into the terminal output, `findings.json`, the SARIF upload, and
+  the fix plan's **Reported by** line.
+- **Absence is reported.** Domains no engine covered are named.
+
+```
+      app.js:6
+        Command string is assembled from a variable before reaching a shell.
+        exec("ping -c 1 " + req.query.host, (err, out) => res.send(out));
+        confirmed by Semgrep / Opengrep
+    injection/command-execution
+
+  Engines: semgrep 4 · trufflehog 1*
+  * authenticated with your own key from the environment
+  2 duplicate findings collapsed where engines agreed on the same line.
+  Dependencies had no engine — Tripwire's own coverage is supply-chain posture only.
+```
+
+**Secrets never reach a model.** Any file that *any* source — a Tripwire rule, TruffleHog,
+or Gitleaks — flagged as holding a credential is excluded from triage entirely. No raw
+secret value reaches the report either: evidence is the redacted form or the detector name.
+
+**Tripwire never passes `--dangerously-run-mcp-servers`** to Snyk Agent Scan. That flag
+executes every command in an MCP config — the correct way to inspect a live server, and an
+indefensible thing to do to you unasked. Repository config paths are passed explicitly, so
+the tool inspects this project rather than sweeping your home directory.
+
+### Air-gapped
+
+```sh
+npx @lapointelabs/tripwire@latest scan --engines --offline
+```
+
+`--offline` refuses any engine needing the network and disables credential verification, so
+a secret reported under it was matched by shape rather than confirmed against its issuer —
+and the report says exactly that.
+
+### Config
+
+`tripwire.config.json` or `.tripwire.json` at the project root. Entirely optional; every
+value has a working default. Unknown keys are reported rather than ignored.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/lapointelabs/tripwire/main/schemas/config.schema.json",
+  "engines": {
+    "semgrep": { "config": "p/ci", "limit": 200 },
+    "trufflehog": { "args": ["--exclude-paths", ".trufflehogignore"] },
+    "gitleaks": false
+  },
+  "scan": { "engines": "auto", "failOn": "high" }
+}
+```
+
+## Dependency vulnerabilities
+
+Tripwire ships no advisory database. `--engines` prefers **osv-scanner** when installed;
+`--audit` is the no-install path, running the auditor your ecosystem already maintains.
+
+```sh
+npx @lapointelabs/tripwire@latest scan --audit
+```
+
+| Ecosystem | Command run | Needs installing |
+| --- | --- | --- |
+| npm / pnpm / yarn | `npm audit`, `pnpm audit`, `yarn npm audit` — chosen by lockfile | ships with the manager |
+| .NET | `dotnet list package --vulnerable --include-transitive` | ships with the SDK |
+| Python | `pip-audit` | `pip install pip-audit` |
+| Go | `govulncheck -json ./...` | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| Rust | `cargo audit --json` | `cargo install cargo-audit` |
+
+**govulncheck findings carry reachability** — a vulnerable function you never call is
+reported low and labelled as such, one your code reaches is high. Rust advisories are high
+and `cargo audit`'s informational warnings (unmaintained, unsound) low, so a crate that
+merely stopped being updated does not drown the real advisory. A missing auditor names the
+command that installs it, including when the binary exists but the subcommand does not.
+
+`--audit` and `--engines` are opt-in for the same reason: they are the only parts of a scan
+that spawn a subprocess and reach the network. A missing tool, an unrestored .NET project,
+or an offline registry degrades to a stated reason and never fails the scan.
+
+## Regression checks
+
+`--scope changed` reports only findings in files you touched, against the merge-base with
+your trunk branch plus anything uncommitted:
+
+```sh
+npx @lapointelabs/tripwire@latest scan --scope changed
+npx @lapointelabs/tripwire@latest scan --scope changed --score   # just the number
+```
+
+Scope narrows what is **reported**, never what is analysed — rules needing whole-project
+context still run against the entire tree. `--base <ref>` pins the comparison point.
+
+For an existing backlog, create an explicit baseline once and fail only on regressions:
+
+```sh
+tripwire scan --project all --no-ai --write-baseline .tripwire-baseline.json
+tripwire scan --project all --no-ai --baseline .tripwire-baseline.json --fail-on-new high
+```
+
+Fingerprints exclude line numbers, so inserting code above a known issue does not make it
+new. Reports show new, known, and resolved counts; `findings.json` and SARIF carry the state.
+Review and replace the baseline deliberately—Tripwire never updates it during a normal scan.
+
+## Benchmarks
+
+Tripwire ships a versioned, labeled regression corpus with risky and safe counterparts:
+
+```sh
+tripwire benchmark --out .tripwire-benchmark
+tripwire benchmark --json --min-precision 1 --min-recall 1
+```
+
+<p align="center">
+  <img src="docs/assets/benchmark-preview.svg" width="100%" alt="Tripwire benchmark report showing 100 percent precision, recall, and F1 on the bundled seeded corpus.">
+</p>
+
+The command reports precision, recall, F1, per-rule misses, and unexpected findings. The
+HTML output makes regressions visible without a dashboard. The bundled corpus is maintained
+by this project, so its result is a repeatable rule-quality gate—not an independent claim
+that Tripwire outperforms another scanner. See [Benchmarking](docs/benchmarking.md) to add a
+case or run a separate corpus.
 
 ## CI
 
 ```yaml
-- run: npx @lapointelabs/tripwire scan --project all --fail-on high --no-ai
-- uses: github/codeql-action/upload-sarif@v3
+- run: npx @lapointelabs/tripwire scan --project all --fail-on high --no-ai --out .tripwire
+- uses: github/codeql-action/upload-sarif@v4
   with:
-    sarif_file: .tripwire/tripwire.sarif
+    sarif_file: .tripwire
 ```
 
-With engines, install the ones you want and pass `--engines` — the SARIF upload carries
-each finding's originating engine and rule id in its properties, so a dashboard entry stays
-traceable to the tool that raised it:
+With engines, install the ones you want and pass `--engines`. The SARIF upload carries each
+finding's originating engine and rule id in its properties, so a dashboard entry stays
+traceable to the tool that raised it. Every project run also has a unique automation id and
+every finding a stable partial fingerprint, so a directory of monorepo reports can be
+uploaded without projects replacing one another:
 
 ```yaml
 - run: pipx install semgrep && brew install trufflehog osv-scanner
 - run: npx @lapointelabs/tripwire scan --project all --engines --fail-on high --no-ai --out .tripwire
   env:
-    SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional — unlocks cross-file analysis
+    SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}   # optional — cross-file analysis
 ```
 
-`--fail-on` accepts `critical`, `high`, `medium`, or `low`. Without it, Tripwire always exits 0 — a scanner that breaks the build on day one gets removed from the build on day two.
+`--fail-on` accepts `critical`, `high`, `medium`, or `low`. Without it Tripwire always exits
+0 — a scanner that breaks the build on day one gets removed from the build on day two.
 
-## Options
+For rollout guidance, data boundaries, evidence retention, and a baseline-first CI policy,
+see [Enterprise adoption](docs/enterprise.md). The configuration schema is published at
+[`schemas/config.schema.json`](schemas/config.schema.json).
+
+## Commands and options
 
 ```
 tripwire scan [PATH]        Scan a project and write a report and a fix plan.
+tripwire benchmark [PATH]   Measure precision and recall on a labeled corpus.
 tripwire list [PATH]        List detected projects, grouped by stack.
 tripwire explain RULE       Explain one rule, including its false positives.
 tripwire playbook           Print the agent triage playbook.
@@ -413,8 +464,12 @@ tripwire engines            List external scan engines and what each one covers.
   --skip ID|CATEGORY        Skip these rules or categories (repeatable).
   --all                     Show every finding in the terminal, not a summary.
   --fail-on LEVEL           Exit non-zero at critical|high|medium|low.
-  --out DIR                 Also write report.md and SARIF here. Default: a cache
+  --baseline FILE           Compare against an accepted findings baseline.
+  --write-baseline FILE     Write current active findings as a baseline.
+  --fail-on-new LEVEL       Fail only for new findings at or above the level.
+  --out DIR                 Also write Markdown, HTML, and SARIF here. Default: a cache
                             directory outside the repository.
+  --import-sarif FILE       Import CodeQL or other SARIF 2.1 results (repeatable).
   --json                    Print findings as JSON and write no files.
   --provider NAME           anthropic | openai | cursor | ollama.
   --model NAME              Model id.
@@ -427,30 +482,37 @@ tripwire engines            List external scan engines and what each one covers.
   --offline                 Refuse engines needing the network; no secret verification.
   --harness LIST            claude, cursor, copilot, agents. Default: detected.
   --force                   Overwrite a skill file Tripwire did not write.
-```
 
-`explain` is worth knowing about. It prints what a rule matches, why it matters, what
-"done" looks like, **and the shapes that rule is known to get wrong** — so an agent
-deciding whether a finding is a false positive has something concrete to check against
-instead of guessing.
-
-```sh
-npx @lapointelabs/tripwire@latest explain structure/await-in-loop
+Benchmark:
+  --min-precision N         Fail when corpus precision is below N (0–1).
+  --min-recall N            Fail when corpus recall is below N (0–1).
 ```
 
 ## Scoring
 
-A score out of 100, based on finding density per thousand lines so that large codebases are not penalised for being large. Severity, category, and confidence all weight the penalty. Two ceilings apply on top: a confirmed critical finding caps the score at 55, and a confirmed high caps it at 78 — a single committed credential should not be averaged away by ten thousand clean lines.
+A score out of 100 based on finding density per thousand lines, so large codebases are not
+penalised for being large. Severity, category, and confidence weight the penalty. Two
+ceilings apply on top: a confirmed critical caps the score at 55 and a confirmed high caps
+it at 78 — a single committed credential should not be averaged away by ten thousand clean
+lines.
 
 Bands: 90+ Healthy · 75–89 Good · 60–74 Needs work · 40–59 At risk · below 40 Critical.
 
 ## Limits
 
-Tripwire reads source text; it does not run your program. It cannot see values that arrive at runtime, configuration applied at deploy time, or a framework's implicit protections. Its own rules do not do interprocedural dataflow — a tainted value laundered through three helper functions in three files will be missed. That specific gap is why [Semgrep or Opengrep](#external-engines) is the first engine in the table; with `--engines` it is covered by a tool built for it, and the report says which.
+Tripwire reads source text; it does not run your program. It cannot see values arriving at
+runtime, configuration applied at deploy time, or a framework's implicit protections. Its
+own rules do not do interprocedural dataflow — a tainted value laundered through three
+helpers in three files will be missed. That gap is why
+[Semgrep or Opengrep](#external-engines) is first in the engine table.
 
-**The absence of a finding is not evidence of the absence of a bug.** Tripwire is a fast, broad first pass that tells you what it checked and how sure it is. It is not a replacement for a security review of code that handles money, credentials, or personal data.
+Without engines, several domains are shallow by design: fourteen token patterns and no
+verification for secrets, posture checks and no advisory database for dependencies, nothing
+for the MCP and skill surface.
 
-**Without engines, several domains are shallow by design** — fourteen token patterns and no verification for secrets, posture checks and no advisory database for dependencies, nothing at all for the MCP and skill surface. `tripwire engines` prints that inventory whether or not you run them, because knowing what went unchecked is the point.
+**The absence of a finding is not evidence of the absence of a bug.** Tripwire is a fast,
+broad first pass that tells you what it checked and how sure it is. It is not a replacement
+for a security review of code that handles money, credentials, or personal data.
 
 ## License
 

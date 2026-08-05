@@ -3,14 +3,18 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { listProviders, resolveProvider, triageFindings } from "./ai.js";
 import { auditProject, VULNERABLE_DEPENDENCY_RULE } from "./audit.js";
+import { compareBaseline, readBaseline, writeBaseline } from "./baseline.js";
+import { DEFAULT_BENCHMARK_ROOT, renderBenchmarkHtml, runBenchmark } from "./benchmark.js";
 import { loadConfig, resolveSelection, unknownEngines } from "./config.js";
 import { detectProjects, findAgentContextFiles, findAgentSurfaceFiles, groupByStack } from "./detect.js";
 import { DOMAINS, ENGINES, planEngines, reconcile, relativizer, runEngines, uncoveredDomains } from "./engines/index.js";
+import { importSarifReports } from "./engines/import.js";
 import { explainRule, findRule } from "./explain.js";
 import { changedFiles, filterToChanged, resolveBase } from "./git.js";
 import { PLAYBOOK } from "./playbook.js";
 import { DEFAULT_COMMAND, detectHarnesses, HARNESSES, installSkills } from "./skills.js";
 import { renderFixPlan } from "./report/fixplan.js";
+import { renderReportHtml } from "./report/html.js";
 import { renderReportMarkdown } from "./report/markdown.js";
 import { renderSarif } from "./report/sarif.js";
 import { renderTerminalReport } from "./report/terminal.js";
@@ -24,6 +28,7 @@ const HELP = `tripwire ${VERSION} — find what hurts your users and misleads yo
 
 Usage:
   tripwire scan [PATH]        Scan a project and write a report and a fix plan.
+  tripwire benchmark [PATH]   Measure precision and recall on a labeled corpus.
   tripwire list [PATH]        List detected projects, grouped by stack.
   tripwire explain RULE       Explain one rule, including its false positives.
   tripwire playbook           Print the agent triage playbook.
@@ -41,8 +46,13 @@ Scan options:
   --skip ID|CATEGORY        Skip these rules or categories (repeatable).
   --all                     Show every finding in the terminal, not a summary.
   --fail-on LEVEL           Exit non-zero at critical|high|medium|low. Default: never.
-  --out DIR                 Also write report.md and SARIF here. Default: a cache
+  --out DIR                 Also write Markdown, HTML, and SARIF here. Default: a cache
                             directory outside the repository.
+  --import-sarif FILE       Fold CodeQL or another SARIF 2.1 report into the scan
+                            (repeatable).
+  --baseline FILE           Compare against an accepted findings baseline.
+  --write-baseline FILE     Write the current active findings as a baseline.
+  --fail-on-new LEVEL       Exit non-zero only for new findings at this level or above.
   --json                    Print findings as JSON to stdout and write no files.
   --audit                   Also run the ecosystem's vulnerability auditor
                             (npm/pnpm/yarn audit, dotnet, pip-audit) and include
@@ -80,6 +90,11 @@ Model triage (bring your own key):
 The deterministic scan needs no API key. Triage is an optional second pass that
 confirms or refutes uncertain findings; without it, low-confidence findings are
 reported as leads rather than conclusions.
+
+Benchmark options:
+  --out DIR                 Write benchmark.json and a visual benchmark.html.
+  --min-precision N         Exit non-zero when precision is below N (0–1).
+  --min-recall N            Exit non-zero when recall is below N (0–1).
 `;
 
 function write(value = "") {
@@ -90,7 +105,7 @@ export async function main(argv) {
   const { positionals, flags } = parseArgs(argv);
   // Match against the known verbs rather than guessing from the shape of the argument,
   // so `tripwire services/billing` scans that path instead of reporting it as a command.
-  const COMMANDS = new Set(["scan", "list", "rules", "providers", "engines", "explain", "playbook", "skills", "help"]);
+  const COMMANDS = new Set(["scan", "benchmark", "list", "rules", "providers", "engines", "explain", "playbook", "skills", "help"]);
   const named = positionals[0] && COMMANDS.has(positionals[0]);
   const command = named ? positionals[0] : "scan";
   const target = (named ? positionals[1] : positionals[0]) || ".";
@@ -100,6 +115,7 @@ export async function main(argv) {
 
   switch (command) {
     case "scan": return commandScan(path.resolve(target), flags);
+    case "benchmark": return commandBenchmark(positionals[1] ? path.resolve(target) : DEFAULT_BENCHMARK_ROOT, flags);
     case "list": return commandList(path.resolve(target), flags);
     case "rules": return commandRules(flags);
     case "providers": return commandProviders(flags);
@@ -110,6 +126,60 @@ export async function main(argv) {
     default:
       throw new Error(`unknown command "${command}". Run tripwire --help.`);
   }
+}
+
+async function commandBenchmark(root, flags) {
+  const palette = createPalette(!flags["no-color"]);
+  const result = await runBenchmark(root);
+  const meta = { version: VERSION };
+
+  if (flags.json) {
+    write(JSON.stringify({ tripwireVersion: VERSION, ...result }, null, 2));
+  } else {
+    const summary = result.summary;
+    write("");
+    write(`  ${palette.bold(result.corpus.name)} ${palette.dim(`v${result.corpus.version}`)}`);
+    write(`  ${palette.dim(result.corpus.description)}`);
+    write("");
+    write(`  ${palette.bold(`${percentage(summary.precision)} precision`)} · ${palette.bold(`${percentage(summary.recall)} recall`)} · ${palette.bold(`${percentage(summary.f1)} F1`)}`);
+    write(`  ${palette.green(`${summary.truePositive} detected`)} · ${palette.red(`${summary.falsePositive} unexpected`)} · ${palette.yellow(`${summary.falseNegative} missed`)} · ${result.durationMs} ms`);
+    write("");
+    for (const row of result.perRule) {
+      const color = row.recall === 1 ? palette.green : palette.yellow;
+      write(`    ${color(`${row.truePositive}/${row.expected}`.padStart(5))}  ${row.ruleId}${row.falsePositive ? palette.red(` · ${row.falsePositive} unexpected`) : ""}`);
+    }
+    write("");
+
+    const requested = flag(flags, "out", null);
+    const base = requested ? path.resolve(String(requested)) : path.join(artifactDirFor(root), "benchmark");
+    await mkdir(base, { recursive: true });
+    const jsonFile = path.join(base, "benchmark.json");
+    const htmlFile = path.join(base, "benchmark.html");
+    await writeFile(jsonFile, `${JSON.stringify({ tripwireVersion: VERSION, ...result }, null, 2)}\n`, "utf8");
+    await writeFile(htmlFile, renderBenchmarkHtml(result, meta), "utf8");
+    write(`  ${palette.cyan("Visual report")} ${palette.blue(htmlFile)}`);
+    write(`  ${palette.dim("Seeded regression corpus—not an independent real-world comparison.")}`);
+    write("");
+  }
+
+  benchmarkGate(result, "--min-precision", flag(flags, "min-precision", null), "precision");
+  benchmarkGate(result, "--min-recall", flag(flags, "min-recall", null), "recall");
+}
+
+function benchmarkGate(result, option, raw, metric) {
+  if (raw === null || raw === undefined) return;
+  const threshold = Number(raw);
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error(`${option} expects a number from 0 to 1`);
+  }
+  if (result.summary[metric] < threshold) {
+    process.stderr.write(`tripwire: benchmark ${metric} ${result.summary[metric].toFixed(3)} is below ${threshold.toFixed(3)}.\n`);
+    process.exitCode = 1;
+  }
+}
+
+function percentage(value) {
+  return `${Math.round(value * 1000) / 10}%`;
 }
 
 function commandExplain(query, flags) {
@@ -354,13 +424,23 @@ async function commandScan(root, flags) {
   }
 
   const config = await loadConfig(root);
+  flags = scanFlags(flags, config.scan);
   const selected = await selectProjects(projects, flags, palette);
   const only = flagList(flags, "only");
   const skip = flagList(flags, "skip");
 
   const quiet = Boolean(flags.json || flags.score);
   const engineSelection = resolveSelection(flags.engines, config);
+  const sarifImports = flagList(flags, "import-sarif");
   const offline = Boolean(flags.offline ?? config.scan?.offline);
+  const baseline = await readBaseline(root, flag(flags, "baseline", null));
+  const baselineTarget = flag(flags, "write-baseline", null);
+  const excludePaths = [
+    baseline?.file,
+    baselineTarget && baselineTarget !== true ? path.resolve(root, String(baselineTarget)) : null,
+    flag(flags, "out", null) ? path.resolve(String(flag(flags, "out"))) : null,
+    ...sarifImports.map((value) => path.resolve(root, value))
+  ].filter(Boolean);
 
   if (!quiet) {
     for (const warning of config.warnings) process.stderr.write(`tripwire: ${config.filename}: ${warning}\n`);
@@ -391,7 +471,7 @@ async function commandScan(root, flags) {
   for (const project of selected) {
     if (!quiet) process.stderr.write(`${palette.dim(`scanning ${project.relative}…`)}\r`);
 
-    const result = await scanProject({ root, project, only, skip });
+    const result = await scanProject({ root, project, only, skip, excludePaths });
     // Scope narrows what is *reported*, never what is analysed: an unused export or a
     // stale instruction reference can only be judged against the whole project.
     if (changed) {
@@ -447,6 +527,18 @@ async function commandScan(root, flags) {
       if (!quiet) process.stderr.write(`${" ".repeat(60)}\r`);
     }
 
+    if (sarifImports.length) {
+      const imported = await importSarifReports(root, sarifImports);
+      result.engines ||= { coverage: [], uncovered: [], offline };
+      result.engines.coverage.push(...imported.coverage);
+      result.findings.push(...imported.findings);
+      if (changed) result.findings = filterToChanged(result.findings, changed.files, project.relative);
+      const before = result.findings.length;
+      result.findings = reconcile(result.findings).sort(compareFindings);
+      result.engines.deduplicated = (result.engines.deduplicated || 0) + before - result.findings.length;
+      result.engines.uncovered = uncoveredDomains(result.engines.coverage);
+    }
+
     result.summary = scoreProject(result.findings, result.stats);
     result.ai = await runTriage(result, flags, root, palette);
     // Triage can refute findings, which changes the score — recompute after it runs.
@@ -458,25 +550,9 @@ async function commandScan(root, flags) {
 
   // Reachability spans assemblies, so it runs once over every project scanned.
   await scanAcrossProjects(results, { only, skip });
-  for (const result of results) result.summary = scoreProject(result.findings, result.stats);
-
-  if (flags.score) {
-    for (const result of results) write(String(result.summary.score));
-    return applyFailOn(results, flags);
-  }
-
-  if (flags.json) {
-    return write(JSON.stringify(results.map((result) => ({
-      project: publicProject(result.project),
-      summary: result.summary,
-      stats: result.stats,
-      scope: result.scope || { mode: "all" },
-      gatedRules: result.gatedRules,
-      engines: result.engines || null,
-      audit: result.audit || null,
-      triage: result.ai,
-      findings: result.findings
-    })), null, 2));
+  for (const result of results) {
+    result.summary = scoreProject(result.findings, result.stats);
+    if (baseline) compareBaseline(result, baseline);
   }
 
   const meta = {
@@ -485,9 +561,43 @@ async function commandScan(root, flags) {
     verifyCommands: await verifyCommands(selected[0])
   };
 
+  let baselineWritten = null;
+  if (baselineTarget) {
+    if (baselineTarget === true) throw new Error("--write-baseline needs a file path");
+    const absolute = path.resolve(root, String(baselineTarget));
+    await mkdir(path.dirname(absolute), { recursive: true });
+    baselineWritten = await writeBaseline(absolute, results, meta);
+  }
+
+  if (flags.score) {
+    for (const result of results) write(String(result.summary.score));
+    return applyFailurePolicy(results, flags);
+  }
+
+  if (flags.json) {
+    write(JSON.stringify(results.map((result) => ({
+      project: publicProject(result.project),
+      summary: result.summary,
+      stats: result.stats,
+      scope: result.scope || { mode: "all" },
+      gatedRules: result.gatedRules,
+      engines: result.engines || null,
+      audit: result.audit || null,
+      baseline: result.baseline || null,
+      triage: result.ai,
+      findings: result.findings
+    })), null, 2));
+    return applyFailurePolicy(results, flags);
+  }
+
+  if (baselineWritten) {
+    write(`  ${palette.green("Baseline")} ${palette.blue(baselineWritten.file)} ${palette.dim(`(${baselineWritten.count} active findings)`)}`);
+    write("");
+  }
+
   for (const result of results) {
     write(renderTerminalReport(result, palette, { all: Boolean(flags.all) }));
-    const written = await writeArtifacts(result, meta, flags);
+    const written = await writeArtifacts(result, meta, flags, { multipleProjects: results.length > 1 });
     const plan = written.files[0];
     // Relative only when it actually reads better — a path that climbs out of the working
     // directory with `../../..` is worse than the absolute one.
@@ -503,21 +613,42 @@ async function commandScan(root, flags) {
     write("");
   }
 
-  applyFailOn(results, flags);
+  applyFailurePolicy(results, flags);
 }
 
-function applyFailOn(results, flags) {
+function applyFailurePolicy(results, flags) {
   const failOn = flag(flags, "fail-on", null);
-  if (!failOn || failOn === "never") return;
-  const threshold = SEVERITIES.indexOf(String(failOn).toLowerCase());
-  if (threshold === -1) throw new Error(`--fail-on expects one of ${SEVERITIES.join(", ")}`);
-  const breached = results.some((result) => SEVERITIES
-    .slice(0, threshold + 1)
-    .some((severity) => (result.summary.bySeverity[severity] || 0) > 0));
-  if (breached) {
-    process.stderr.write(`tripwire: findings at or above "${failOn}" — failing as requested.\n`);
-    process.exitCode = 1;
+  if (failOn && failOn !== "never") {
+    const threshold = severityThreshold("--fail-on", failOn);
+    const breached = results.some((result) => SEVERITIES
+      .slice(0, threshold + 1)
+      .some((severity) => (result.summary.bySeverity[severity] || 0) > 0));
+    if (breached) {
+      process.stderr.write(`tripwire: findings at or above "${failOn}" — failing as requested.\n`);
+      process.exitCode = 1;
+    }
   }
+
+  const failOnNew = flag(flags, "fail-on-new", null);
+  if (failOnNew && failOnNew !== "never") {
+    if (!results.some((result) => result.baseline)) {
+      throw new Error("--fail-on-new requires --baseline FILE");
+    }
+    const threshold = severityThreshold("--fail-on-new", failOnNew);
+    const breached = results.some((result) => SEVERITIES
+      .slice(0, threshold + 1)
+      .some((severity) => (result.baseline?.newBySeverity?.[severity] || 0) > 0));
+    if (breached) {
+      process.stderr.write(`tripwire: new findings at or above "${failOnNew}" — failing as requested.\n`);
+      process.exitCode = 1;
+    }
+  }
+}
+
+function severityThreshold(option, value) {
+  const threshold = SEVERITIES.indexOf(String(value).toLowerCase());
+  if (threshold === -1) throw new Error(`${option} expects one of ${SEVERITIES.join(", ")}`);
+  return threshold;
 }
 
 async function selectProjects(projects, flags, palette) {
@@ -634,14 +765,20 @@ async function runTriage(result, flags, root, palette) {
  * Write scan artifacts.
  *
  * By default only the two that get read: the fix plan, and the machine-readable findings.
- * The Markdown report duplicates what the terminal already showed, and SARIF only matters
- * to a CI uploader — generating either by default is output nobody asked for. Both come
+ * The Markdown/HTML reports duplicate what the terminal already showed, and SARIF only
+ * matters to a CI uploader — generating them by default is output nobody asked for. They come
  * back with an explicit `--out`, which is also the only way anything lands in the
  * repository rather than the cache directory.
  */
-async function writeArtifacts(result, meta, flags) {
+async function writeArtifacts(result, meta, flags, { multipleProjects = false } = {}) {
   const requested = flag(flags, "out", null);
-  const base = requested ? path.resolve(String(requested)) : artifactDirFor(result.project.directory);
+  const requestedBase = requested ? path.resolve(String(requested)) : null;
+  const projectPath = result.project.relative === "."
+    ? result.project.name.replace(/[^A-Za-z0-9._-]/g, "-")
+    : result.project.relative;
+  const base = requestedBase
+    ? (multipleProjects ? path.join(requestedBase, projectPath) : requestedBase)
+    : artifactDirFor(result.project.directory);
   const full = Boolean(requested);
   await mkdir(base, { recursive: true });
 
@@ -657,6 +794,7 @@ async function writeArtifacts(result, meta, flags) {
       gatedRules: result.gatedRules,
       engines: result.engines || null,
       audit: result.audit || null,
+      baseline: result.baseline || null,
       triage: result.ai,
       findings: result.findings
     }, null, 2)}\n`]
@@ -664,11 +802,32 @@ async function writeArtifacts(result, meta, flags) {
 
   if (full) {
     files.push([path.join(base, "report.md"), renderReportMarkdown(result, meta)]);
+    files.push([path.join(base, "report.html"), renderReportHtml(result, meta)]);
     files.push([path.join(base, "tripwire.sarif"), `${JSON.stringify(renderSarif(result, meta), null, 2)}\n`]);
   }
 
   for (const [file, contents] of files) await writeFile(file, contents, "utf8");
   return { files: files.map(([file]) => file), base, inRepo: full };
+}
+
+function scanFlags(flags, config = {}) {
+  const configured = {
+    engines: config.engines,
+    offline: config.offline,
+    "fail-on": config.failOn,
+    "fail-on-new": config.failOnNew,
+    baseline: config.baseline,
+    only: config.only,
+    skip: config.skip,
+    provider: config.provider,
+    model: config.model,
+    budget: config.budget,
+    audit: config.audit,
+    out: config.out,
+    "import-sarif": config.importSarif
+  };
+  return Object.fromEntries(Object.entries({ ...configured, ...flags })
+    .filter(([, value]) => value !== undefined));
 }
 
 async function verifyCommands(project) {

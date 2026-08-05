@@ -46,6 +46,12 @@ export function renderTerminalReport(result, palette, options = {}) {
     lines.push(palette.dim(`  Reporting only the ${result.scope.files} changed ${pluralize(result.scope.files, "file")} (${result.scope.base}). The whole project was analysed; findings elsewhere are not shown.`));
   }
 
+  if (result.baseline) {
+    const baseline = result.baseline;
+    const detail = `${baseline.new} new · ${baseline.unchanged} known · ${baseline.resolved} resolved`;
+    lines.push(baseline.new ? palette.yellow(`  Baseline: ${detail}`) : palette.green(`  Baseline: ${detail}`));
+  }
+
   lines.push(...engineLines(result, palette));
 
   if (result.audit?.ran) {
@@ -85,8 +91,8 @@ export function renderTerminalReport(result, palette, options = {}) {
 /**
  * What the external engines covered, and — the part worth printing — what nobody did.
  *
- * A harness that runs five tools and reports only their combined findings has hidden the
- * most useful fact it knows: which of the five was absent. That absence is the difference
+ * A harness that runs several tools and reports only their combined findings has hidden the
+ * most useful fact it knows: which engine was absent. That absence is the difference
  * between "no secrets found" and "no secrets found by the fourteen patterns Tripwire
  * ships, with no verification and no history scan", and the two must not read alike.
  */

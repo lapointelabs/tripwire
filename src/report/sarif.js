@@ -1,5 +1,6 @@
 import { allRules } from "../rules/index.js";
 import { activeFindings } from "../score.js";
+import { fingerprintFinding } from "../baseline.js";
 
 const SARIF_LEVEL = { critical: "error", high: "error", medium: "warning", low: "note" };
 
@@ -28,6 +29,7 @@ export function renderSarif(result, meta) {
     $schema: "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
     version: "2.1.0",
     runs: [{
+      automationDetails: { id: `tripwire/${automationId(result.project.relative)}/` },
       tool: {
         driver: {
           name: "Tripwire",
@@ -39,7 +41,9 @@ export function renderSarif(result, meta) {
       results: active.map((finding) => ({
         ruleId: finding.ruleId,
         level: SARIF_LEVEL[finding.severity] || "warning",
+        baselineState: finding.baselineState,
         message: { text: finding.message },
+        partialFingerprints: { "tripwire/v1": finding.fingerprint || fingerprintFinding(finding) },
         locations: [{
           physicalLocation: {
             artifactLocation: { uri: finding.file },
@@ -64,6 +68,11 @@ export function renderSarif(result, meta) {
       }))
     }]
   };
+}
+
+function automationId(value) {
+  const text = value === "." ? "root" : String(value || "root");
+  return text.replace(/[^A-Za-z0-9._/-]/g, "-").replace(/^\/+|\/+$/g, "") || "root";
 }
 
 function securitySeverity(severity) {

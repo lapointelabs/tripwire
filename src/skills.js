@@ -180,7 +180,7 @@ that dodges the pattern.
 | \`${tw} scan --score\` | Numeric score only |
 | \`${tw} scan --fail-on high\` | Exit non-zero at or above a severity (CI) |
 | \`${tw} scan --audit\` | Also run npm/pnpm/dotnet/pip vulnerability auditors |
-| \`${tw} scan --engines\` | Also run installed engines (Semgrep, TruffleHog, osv-scanner, agnix) |
+| \`${tw} scan --engines\` | Also run installed SAST, secrets, dependency, and agent-surface engines |
 | \`${tw} engines\` | What each engine covers, and which domains nothing covered |
 | \`${tw} explain <rule-id>\` | Rule detail and its false positives |
 | \`${tw} list\` | Detected projects, grouped by stack |

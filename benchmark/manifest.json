@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "name": "Tripwire seeded security corpus",
+  "version": "1.0.0",
+  "description": "Deterministic positive and negative JavaScript cases for core security and agent-safety rules.",
+  "cases": [
+    {
+      "id": "javascript-agent-security",
+      "title": "JavaScript agent application",
+      "description": "Fourteen seeded vulnerabilities with safe counterparts beside the risky forms.",
+      "path": "corpus/javascript-agent-security",
+      "only": ["security", "agent-safety", "supply-chain"],
+      "expectations": [
+        { "ruleId": "secrets/committed-credential", "file": "src/agent.js", "line": 7 },
+        { "ruleId": "llm/untrusted-input-in-prompt", "file": "src/agent.js", "line": 16 },
+        { "ruleId": "llm/model-output-to-sink", "file": "src/agent.js", "line": 38 },
+        { "ruleId": "llm/dynamic-tool-description", "file": "src/agent.js", "line": 45 },
+        { "ruleId": "llm/permission-bypass", "file": "src/agent.js", "line": 51 },
+        { "ruleId": "injection/sql-interpolation", "file": "src/api.js", "line": 11 },
+        { "ruleId": "injection/sql-interpolation", "file": "src/api.js", "line": 17 },
+        { "ruleId": "injection/command-execution", "file": "src/api.js", "line": 33 },
+        { "ruleId": "injection/path-traversal", "file": "src/api.js", "line": 38 },
+        { "ruleId": "web/raw-html-sink", "file": "src/api.js", "line": 44 },
+        { "ruleId": "web/disabled-tls-verification", "file": "src/api.js", "line": 48 },
+        { "ruleId": "web/permissive-cors", "file": "src/api.js", "line": 51 },
+        { "ruleId": "injection/dynamic-code-execution", "file": "src/api.js", "line": 55 },
+        { "ruleId": "supply-chain/no-lockfile", "file": "package.json", "line": 1 }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lapointelabs/tripwire/main/schemas/config.schema.json",
+  "title": "Tripwire configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "engines": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semgrep": { "$ref": "#/$defs/engine" },
+        "snyk-code": { "$ref": "#/$defs/engine" },
+        "prooflayer": { "$ref": "#/$defs/engine" },
+        "trufflehog": { "$ref": "#/$defs/engine" },
+        "gitleaks": { "$ref": "#/$defs/engine" },
+        "osv-scanner": { "$ref": "#/$defs/engine" },
+        "snyk-agent-scan": { "$ref": "#/$defs/engine" },
+        "cisco-skill-scanner": { "$ref": "#/$defs/engine" },
+        "agnix": { "$ref": "#/$defs/engine" }
+      }
+    },
+    "scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "engines": { "oneOf": [{ "enum": ["auto", "all", "none"] }, { "type": "array", "items": { "type": "string" }, "uniqueItems": true }] },
+        "offline": { "type": "boolean" },
+        "failOn": { "$ref": "#/$defs/threshold" },
+        "failOnNew": { "$ref": "#/$defs/threshold" },
+        "baseline": { "type": "string", "minLength": 1 },
+        "only": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "skip": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "provider": { "enum": ["anthropic", "openai", "cursor", "ollama"] },
+        "model": { "type": "string", "minLength": 1 },
+        "budget": { "type": "integer", "minimum": 1 },
+        "audit": { "type": "boolean" },
+        "out": { "type": "string", "minLength": 1 },
+        "importSarif": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    }
+  },
+  "$defs": {
+    "threshold": { "enum": ["critical", "high", "medium", "low", "never"] },
+    "engine": {
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "config": { "type": "string" },
+            "args": { "type": "array", "items": { "type": "string" } },
+            "env": { "type": "object", "additionalProperties": { "type": "string" } },
+            "limit": { "type": "integer", "minimum": 1 },
+            "timeoutMs": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    }
+  }
+}

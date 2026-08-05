@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="690" viewBox="0 0 1200 690" role="img" aria-labelledby="title desc">
+  <title id="title">Example Tripwire HTML security report</title>
+  <desc id="desc">A report for the bundled vulnerable benchmark fixture showing a score of 3, 14 findings, severity and category charts, coverage, and filterable findings.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="7" stdDeviation="12" flood-color="#111" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="690" rx="18" fill="#eeece5"/>
+  <g filter="url(#shadow)">
+    <rect x="30" y="26" width="1140" height="638" rx="14" fill="#f8f7f3" stroke="#000" stroke-opacity=".08"/>
+    <rect x="30" y="26" width="1140" height="42" rx="14" fill="#fff"/>
+    <rect x="30" y="54" width="1140" height="14" fill="#fff"/>
+    <circle cx="51" cy="47" r="5" fill="#ff7168"/>
+    <circle cx="69" cy="47" r="5" fill="#ffc55b"/>
+    <circle cx="87" cy="47" r="5" fill="#62c98a"/>
+    <rect x="430" y="37" width="340" height="20" rx="10" fill="#f1f0eb"/>
+    <text x="600" y="51" text-anchor="middle" fill="#88847b" font-family="ui-sans-serif,system-ui,sans-serif" font-size="10">report.html · generated locally</text>
+  </g>
+
+  <g transform="translate(70 98)" font-family="ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text x="0" y="0" fill="#66645e" font-size="10" font-weight="700" letter-spacing="1.5">TRIPWIRE SECURITY REPORT</text>
+    <text x="0" y="34" fill="#171716" font-size="26" font-weight="700" letter-spacing="-.6">tripwire-benchmark-agent-app</text>
+    <text x="0" y="57" fill="#77736b" font-size="12">JavaScript · Express · 3 files · 125 lines</text>
+
+    <g transform="translate(1008 16)">
+      <circle cx="0" cy="0" r="42" fill="none" stroke="#e6e3da" stroke-width="9"/>
+      <circle cx="0" cy="0" r="42" fill="none" stroke="#3157a4" stroke-width="9" stroke-linecap="round" stroke-dasharray="8 264" transform="rotate(-90)"/>
+      <text x="0" y="1" text-anchor="middle" fill="#171716" font-size="23" font-weight="700">3</text>
+      <text x="0" y="18" text-anchor="middle" fill="#a92525" font-size="9" font-weight="700">CRITICAL</text>
+    </g>
+
+    <line x1="0" y1="81" x2="1060" y2="81" stroke="#d9d6cc"/>
+
+    <g transform="translate(0 103)">
+      <g><rect width="250" height="68" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/><text x="16" y="23" fill="#77736b" font-size="10">Active findings</text><text x="16" y="51" fill="#171716" font-size="24" font-weight="700">14</text></g>
+      <g transform="translate(270)"><rect width="250" height="68" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/><text x="16" y="23" fill="#77736b" font-size="10">Critical</text><text x="16" y="51" fill="#a92525" font-size="24" font-weight="700">7</text></g>
+      <g transform="translate(540)"><rect width="250" height="68" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/><text x="16" y="23" fill="#77736b" font-size="10">Files scanned</text><text x="16" y="51" fill="#171716" font-size="24" font-weight="700">3</text></g>
+      <g transform="translate(810)"><rect width="250" height="68" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/><text x="16" y="23" fill="#77736b" font-size="10">Lines scanned</text><text x="16" y="51" fill="#171716" font-size="24" font-weight="700">125</text></g>
+    </g>
+
+    <g transform="translate(0 191)">
+      <rect width="520" height="142" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/>
+      <text x="17" y="28" fill="#171716" font-size="14" font-weight="700">Severity</text>
+      <text x="17" y="57" fill="#66645e" font-size="10">Critical</text><rect x="96" y="49" width="370" height="8" rx="4" fill="#ece9df"/><rect x="96" y="49" width="185" height="8" rx="4" fill="#a92525"/><text x="493" y="58" text-anchor="end" fill="#171716" font-size="11" font-weight="700">7</text>
+      <text x="17" y="84" fill="#66645e" font-size="10">High</text><rect x="96" y="76" width="370" height="8" rx="4" fill="#ece9df"/><rect x="96" y="76" width="185" height="8" rx="4" fill="#d35a23"/><text x="493" y="85" text-anchor="end" fill="#171716" font-size="11" font-weight="700">7</text>
+      <text x="17" y="111" fill="#66645e" font-size="10">Medium</text><rect x="96" y="103" width="370" height="8" rx="4" fill="#ece9df"/><text x="493" y="112" text-anchor="end" fill="#171716" font-size="11" font-weight="700">0</text>
+    </g>
+    <g transform="translate(540 191)">
+      <rect width="520" height="142" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/>
+      <text x="17" y="28" fill="#171716" font-size="14" font-weight="700">Categories</text>
+      <text x="17" y="57" fill="#66645e" font-size="10">Security</text><rect x="96" y="49" width="370" height="8" rx="4" fill="#ece9df"/><rect x="96" y="49" width="370" height="8" rx="4" fill="#3157a4"/><text x="493" y="58" text-anchor="end" fill="#171716" font-size="11" font-weight="700">9</text>
+      <text x="17" y="84" fill="#66645e" font-size="10">Agent safety</text><rect x="96" y="76" width="370" height="8" rx="4" fill="#ece9df"/><rect x="96" y="76" width="164" height="8" rx="4" fill="#3157a4"/><text x="493" y="85" text-anchor="end" fill="#171716" font-size="11" font-weight="700">4</text>
+      <text x="17" y="111" fill="#66645e" font-size="10">Supply chain</text><rect x="96" y="103" width="370" height="8" rx="4" fill="#ece9df"/><rect x="96" y="103" width="41" height="8" rx="4" fill="#3157a4"/><text x="493" y="112" text-anchor="end" fill="#171716" font-size="11" font-weight="700">1</text>
+    </g>
+
+    <g transform="translate(0 353)">
+      <rect width="1060" height="52" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/>
+      <text x="17" y="21" fill="#171716" font-size="13" font-weight="700">Coverage</text>
+      <circle cx="20" cy="36" r="4" fill="#237a46"/><text x="31" y="40" fill="#66645e" font-size="10">Native rules ran</text>
+      <circle cx="153" cy="36" r="4" fill="#b58213"/><text x="164" y="40" fill="#66645e" font-size="10">External engines not requested</text>
+      <text x="1042" y="40" text-anchor="end" fill="#66645e" font-size="10">No AI triage</text>
+    </g>
+
+    <g transform="translate(0 425)">
+      <rect width="1060" height="131" rx="11" fill="#fff" stroke="#000" stroke-opacity=".08"/>
+      <text x="17" y="25" fill="#171716" font-size="14" font-weight="700">Findings</text>
+      <rect x="710" y="10" width="210" height="28" rx="7" fill="#f5f4ef" stroke="#d9d6cc"/><text x="723" y="28" fill="#99958d" font-size="10">Filter rule, file, or evidence</text>
+      <rect x="930" y="10" width="112" height="28" rx="7" fill="#f5f4ef" stroke="#d9d6cc"/><text x="942" y="28" fill="#66645e" font-size="10">All severities⌄</text>
+      <line x1="17" y1="49" x2="1043" y2="49" stroke="#e4e1d8"/>
+
+      <rect x="17" y="61" width="54" height="19" rx="10" fill="#a92525"/><text x="44" y="74" text-anchor="middle" fill="#fff" font-size="8" font-weight="700">CRITICAL</text>
+      <text x="88" y="72" fill="#171716" font-size="11" font-weight="700">SQL built by string interpolation</text><text x="406" y="72" fill="#66645e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9">src/api.js:11</text><text x="1042" y="72" text-anchor="end" fill="#66645e" font-size="9">High</text>
+      <line x1="17" y1="87" x2="1043" y2="87" stroke="#e4e1d8"/>
+      <rect x="17" y="98" width="54" height="19" rx="10" fill="#a92525"/><text x="44" y="111" text-anchor="middle" fill="#fff" font-size="8" font-weight="700">CRITICAL</text>
+      <text x="88" y="109" fill="#171716" font-size="11" font-weight="700">Model output reaches an execution sink</text><text x="406" y="109" fill="#66645e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="9">src/agent.js:38</text><text x="1042" y="109" text-anchor="end" fill="#66645e" font-size="9">Likely</text>
+    </g>
+  </g>
+</svg>

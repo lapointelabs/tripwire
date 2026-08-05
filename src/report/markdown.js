@@ -9,17 +9,18 @@ export function renderReportMarkdown(result, meta) {
   const groups = groupByRule(active);
   const out = [];
 
-  out.push(`# Tripwire report — ${project.name}`);
+  out.push(`# Tripwire report — ${escapeText(project.name)}`);
   out.push("");
   out.push(`**${summary.score}/100 · ${summary.grade}** — ${active.length} ${pluralize(active.length, "finding")} across ${stats.files} ${pluralize(stats.files, "file")} (${stats.lines.toLocaleString()} lines).`);
   out.push("");
   out.push(`| | |`);
   out.push(`| --- | --- |`);
-  out.push(`| Project | \`${project.relative}\` |`);
-  out.push(`| Stack | ${project.language} · ${project.framework} |`);
-  out.push(`| Scanned | ${meta.scannedAt} |`);
-  out.push(`| Tripwire | ${meta.version} |`);
-  out.push(`| Triage | ${ai?.used ? `${ai.label} · ${ai.model}` : "none — pattern confidence only"} |`);
+  out.push(`| Project | ${inlineCode(project.relative)} |`);
+  out.push(`| Stack | ${escapeCell(`${project.language} · ${project.framework}`)} |`);
+  out.push(`| Scanned | ${escapeCell(meta.scannedAt)} |`);
+  out.push(`| Tripwire | ${escapeCell(meta.version)} |`);
+  out.push(`| Triage | ${escapeCell(ai?.used ? `${ai.label} · ${ai.model}` : "none — pattern confidence only")} |`);
+  if (result.baseline) out.push(`| Baseline | ${result.baseline.new} new · ${result.baseline.unchanged} known · ${result.baseline.resolved} resolved |`);
   out.push("");
 
   out.push(`## Severity`);
@@ -51,7 +52,7 @@ export function renderReportMarkdown(result, meta) {
       const status = entry.ran
         ? `ran as \`${entry.tool}\` — ${entry.total} ${pluralize(entry.total, "finding")}${entry.usedKey ? ` (authenticated with \`${entry.keyName}\`)` : ""}`
         : entry.reason;
-      out.push(`| ${entry.label} | ${escapeCell(entry.covers)} | ${escapeCell(status)} |`);
+      out.push(`| ${escapeCell(entry.label)} | ${escapeCell(entry.covers)} | ${escapeCell(status)} |`);
     }
     out.push("");
     if (result.engines.deduplicated) {
@@ -77,18 +78,18 @@ export function renderReportMarkdown(result, meta) {
   out.push(`## Findings`);
   out.push("");
   for (const group of groups) {
-    out.push(`### ${severityBadge(group.severity)} ${group.title}${group.findings.length > 1 ? ` (${group.findings.length})` : ""}`);
+    out.push(`### ${severityBadge(group.severity)} ${escapeText(group.title)}${group.findings.length > 1 ? ` (${group.findings.length})` : ""}`);
     out.push("");
-    out.push(`\`${group.ruleId}\` · ${CATEGORIES[group.category]?.label || group.category}`);
+    out.push(`${inlineCode(group.ruleId)} · ${escapeText(CATEGORIES[group.category]?.label || group.category)}`);
     out.push("");
-    out.push(`**Why this matters.** ${group.why}`);
+    out.push(`**Why this matters.** ${escapeText(group.why)}`);
     out.push("");
-    out.push(`**How to fix it.** ${group.fix}`);
+    out.push(`**How to fix it.** ${escapeText(group.fix)}`);
     out.push("");
     out.push(`| Location | Evidence | Confidence |`);
     out.push(`| --- | --- | --- |`);
     for (const finding of group.findings) {
-      out.push(`| \`${finding.file}:${finding.line}\` | ${escapeCell(finding.evidence || finding.message)} | ${confidenceLabel(finding)} |`);
+      out.push(`| ${inlineCode(`${finding.file}:${finding.line}`)} | ${escapeCell(finding.evidence || finding.message)} | ${escapeCell(confidenceLabel(finding))} |`);
     }
     out.push("");
     const verified = group.findings.filter((finding) => finding.verdict?.reason);
@@ -96,7 +97,7 @@ export function renderReportMarkdown(result, meta) {
       out.push(`<details><summary>Triage notes</summary>`);
       out.push("");
       for (const finding of verified) {
-        out.push(`- \`${finding.file}:${finding.line}\` — ${finding.verdict.reason}`);
+        out.push(`- ${inlineCode(`${finding.file}:${finding.line}`)} — ${escapeText(finding.verdict.reason)}`);
       }
       out.push("");
       out.push(`</details>`);
@@ -111,7 +112,7 @@ export function renderReportMarkdown(result, meta) {
     out.push("These matched a rule but the review model found the surrounding code already handles the concern. They are excluded from the score. Spot-check a few — a refutation is a judgment, not a proof.");
     out.push("");
     for (const finding of refuted) {
-      out.push(`- \`${finding.file}:${finding.line}\` — ${finding.ruleId}: ${finding.verdict.reason}`);
+      out.push(`- ${inlineCode(`${finding.file}:${finding.line}`)} — ${inlineCode(finding.ruleId)}: ${escapeText(finding.verdict.reason)}`);
     }
     out.push("");
   }
@@ -125,11 +126,11 @@ function readCoverage(capabilities, gatedRules, ai, audit, engines) {
     notes.push(`- **No external engines ran.** Tripwire's own rules are a broad first pass; deeper coverage — cross-file dataflow, credential verification, MCP and skill inspection — is delegated to engines you install. Re-run with \`--engines\`, or run \`tripwire engines\` to see what is available.`);
   } else {
     for (const gap of engines.uncovered || []) {
-      notes.push(`- **${gap.label} had no engine.** Tripwire's own coverage of this domain is ${gap.native}, and nothing deeper ran against it.`);
+      notes.push(`- **${escapeText(gap.label)} had no engine.** Tripwire's own coverage of this domain is ${escapeText(gap.native)}, and nothing deeper ran against it.`);
     }
     const notRun = new Set(["failed", "no-key", "offline", "disabled"]);
     for (const entry of engines.coverage.filter((item) => notRun.has(item.status))) {
-      notes.push(`- **${entry.label} did not run:** ${entry.reason}. It would have covered ${entry.covers}.`);
+      notes.push(`- **${escapeText(entry.label)} did not run:** ${escapeText(entry.reason)}. It would have covered ${escapeText(entry.covers)}.`);
     }
     if (engines.offline) {
       notes.push(`- **Offline mode was on.** Engines needing the network were skipped, and credential verification was disabled — a secret reported here was matched by shape, not confirmed against its issuer.`);
@@ -175,5 +176,19 @@ function confidenceLabel(finding) {
 }
 
 function escapeCell(value) {
-  return String(value).replace(/\|/g, "\\|").replace(/\n/g, " ").slice(0, 140);
+  return escapeText(value).replace(/\|/g, "\\|").slice(0, 140);
+}
+
+function escapeText(value) {
+  return String(value ?? "")
+    .replace(/[&<>]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character])
+    .replace(/\r?\n/g, " ");
+}
+
+function inlineCode(value) {
+  const escaped = escapeText(value);
+  const longest = Math.max(0, ...[...escaped.matchAll(/`+/g)].map((match) => match[0].length));
+  const fence = "`".repeat(Math.max(1, longest + 1));
+  const padding = escaped.startsWith("`") || escaped.endsWith("`") ? " " : "";
+  return `${fence}${padding}${escaped}${padding}${fence}`;
 }

@@ -140,6 +140,60 @@ const snykCode = {
   }
 };
 
+/**
+ * ProofLayer's full scanner. Unlike the lightweight regex package, this command exposes a
+ * repository scan with AST, taint, cross-file, MCP and package checks in one JSON result.
+ * The rule-based pass is local; its separate semantic-review command is intentionally not
+ * invoked here because that would send source to a model under an ordinary engine scan.
+ */
+const prooflayer = {
+  id: "prooflayer",
+  label: "ProofLayer Full Scanner",
+  domain: "code",
+  covers: "AST, taint and cross-file security analysis with agent-specific rules",
+  fills: "a broad second opinion including package hallucination and MCP-oriented rules",
+  homepage: "https://github.com/sinewaveai/agent-security-scanner-mcp",
+  launchers: [{ command: "agent-security-scanner-mcp" }],
+  install: "npm i -g agent-security-scanner-mcp",
+  scope: "project",
+  network: false,
+  timeoutMs: 600_000,
+  attempts({ dir }) {
+    return [{ args: ["scan-project", dir, "--verbosity", "full"], format: "json" }];
+  },
+  cleanExitCodes: [0, 1],
+  parse(payload, context) {
+    const entries = collectProofLayerFindings(payload);
+    return entries.map((entry) => {
+      const externalRuleId = entry.ruleId || entry.rule_id || entry.rule || entry.id || "prooflayer/unknown";
+      const domain = proofLayerDomain(externalRuleId, entry.category);
+      const file = context.toRelative(entry.file || entry.path || entry.location?.file || payload?.file);
+      if (!file) return null;
+      const line = Math.max(1, Number(entry.line || entry.location?.line) || 1);
+      const secret = domain === "secrets";
+      return {
+        domain,
+        externalRuleId,
+        file,
+        line,
+        endLine: Math.max(line, Number(entry.endLine || entry.end_line) || line),
+        severity: proofLayerSeverity(entry.severity || entry.level),
+        confidence: proofLayerConfidence(entry.confidence),
+        title: secret
+          ? "Credential reported by ProofLayer"
+          : entry.title || entry.name || String(externalRuleId).replace(/[._/-]+/g, " "),
+        message: secret
+          ? `ProofLayer reported a credential at this location (${externalRuleId}); the value was withheld.`
+          : entry.message || entry.description || "ProofLayer reported a security concern.",
+        // A scanner finding a secret must not copy it into the combined report or model
+        // triage payload. Withhold the snippet even when the upstream JSON includes it.
+        evidence: secret ? "credential value withheld" : String(entry.evidence || entry.snippet || "").slice(0, 200),
+        refs: [entry.helpUri, entry.reference, entry.url].filter(Boolean)
+      };
+    }).filter(Boolean);
+  }
+};
+
 /* ----------------------------------------------------------------------- secrets --- */
 
 /**
@@ -419,6 +473,41 @@ const agentScan = {
 };
 
 /**
+ * Cisco's skill scanner adds bytecode, YARA, pipeline and behavioral dataflow analysis to
+ * SKILL.md bundles. The default here is fully local: cloud/LLM/VirusTotal analyzers remain
+ * opt-in through explicit engine args in the user's config.
+ */
+const ciscoSkillScanner = {
+  id: "cisco-skill-scanner",
+  label: "Cisco AI Defense Skill Scanner",
+  domain: "agent-surface",
+  covers: "skill static, YARA, bytecode, pipeline and behavioral dataflow analysis",
+  fills: "deeper inspection of code and payloads shipped inside agent skill bundles",
+  homepage: "https://github.com/cisco-ai-defense/skill-scanner",
+  launchers: [{ command: "skill-scanner" }],
+  install: "uv tool install cisco-ai-skill-scanner, or pipx install cisco-ai-skill-scanner",
+  scope: "root",
+  network: false,
+  networkArgs: ["--use-llm", "--use-aidefense", "--use-virustotal", "--vt-upload-files", "--enable-meta"],
+  timeoutMs: 600_000,
+  reportFile: ".sarif",
+  appliesTo({ skills }) {
+    return skills.length ? null : "no SKILL.md bundles in this repository";
+  },
+  attempts({ dir, reportPath }) {
+    return [{ args: ["scan-all", dir, "--recursive", "--use-behavioral", "--format", "sarif", "--output", reportPath], format: "json" }];
+  },
+  cleanExitCodes: [0, 1],
+  parse(payload, context) {
+    return findingsFromSarif(payload, {
+      toRelative: context.toRelative,
+      engine: ciscoSkillScanner.id,
+      defaultSeverity: "medium"
+    });
+  }
+};
+
+/**
  * agnix. A linter for the instruction files themselves — CLAUDE.md, AGENTS.md, SKILL.md,
  * hooks, MCP config — across ten harnesses and several hundred rules.
  *
@@ -459,7 +548,7 @@ const agnix = {
   }
 };
 
-export const ENGINES = [semgrep, snykCode, trufflehog, gitleaks, osvScanner, agentScan, agnix];
+export const ENGINES = [semgrep, snykCode, prooflayer, trufflehog, gitleaks, osvScanner, agentScan, ciscoSkillScanner, agnix];
 
 export const DOMAINS = {
   code: { label: "Code analysis", native: "injection, web, and taint rules" },
@@ -474,6 +563,42 @@ export function engineById(id) {
 }
 
 export { DEFAULT_LIMIT };
+
+function collectProofLayerFindings(payload) {
+  const findings = [];
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+      return;
+    }
+    const rule = value.ruleId || value.rule_id || value.rule;
+    if (rule && (value.message || value.description || value.title)) findings.push(value);
+    for (const [key, child] of Object.entries(value)) {
+      if (["findings", "issues", "results", "alerts"].includes(key)) visit(child);
+    }
+  };
+  visit(payload);
+  return findings;
+}
+
+function proofLayerDomain(ruleId, category) {
+  const value = `${ruleId} ${category || ""}`.toLowerCase();
+  if (/secret|credential|api[-_. ]?key|token/.test(value)) return "secrets";
+  if (/dependenc|package|cve|sbom|hallucinat|typosquat/.test(value)) return "deps";
+  if (/\bmcp\b|skill|prompt|agent|jailbreak/.test(value)) return "agent-surface";
+  return "code";
+}
+
+function proofLayerSeverity(value) {
+  const named = String(value || "").toLowerCase();
+  return { critical: "critical", error: "high", high: "high", warning: "medium", warn: "medium", medium: "medium", info: "low", low: "low" }[named] || "medium";
+}
+
+function proofLayerConfidence(value) {
+  const named = String(value || "").toLowerCase();
+  return ["high", "medium", "low"].includes(named) ? named : "medium";
+}
 
 /** Where an engine's report file goes, if it insists on writing one. */
 export function reportFileName(engine, suffix) {

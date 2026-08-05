@@ -1,146 +1,111 @@
 name: Release
 
-# Publishing is triggered by pushing a version tag, so the released artifact always
-# corresponds to a specific commit that is in the repository. Nothing publishes from a
-# working tree.
+# Pushing a version tag publishes to npm. A manual run re-runs verification only.
+# Publishing is unreachable from anything but a tag push, so the released artifact always
+# corresponds to a commit that exists in the repository.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Build and verify without publishing"
-        type: boolean
-        default: true
+
+# Least privilege: jobs start with no token scopes and grant only what they need.
+permissions: {}
+
+# A re-run must not race the original. Releases are never cancelled mid-flight.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # package.json claims `engines: node >=20.1`. Testing on one version would make that
-  # claim untested — and the floor is the version most likely to break, since it is the
-  # one nobody develops on.
+  # package.json claims `engines: node >=20.1`. Testing one version leaves that claim
+  # untested, and the floor is the version most likely to break — nobody develops on it.
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         node: ["20", "22", "24"]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
 
       - run: npm ci
       - run: npm test
 
-      # Catches the failure mode a dry run cannot: a package that resolves and installs
-      # but does not actually run once unpacked somewhere else.
-      - name: Install the tarball and run the binary
+      # Catches the failure mode inspecting a tarball cannot: a package that resolves and
+      # installs but does not actually run once unpacked somewhere else.
+      - name: Install the packed tarball and run the binary
         run: |
           npm pack --ignore-scripts
-          mkdir -p /tmp/installcheck && cd /tmp/installcheck
-          npm init -y >/dev/null
+          mkdir -p "$RUNNER_TEMP/installcheck"
+          cd "$RUNNER_TEMP/installcheck"
+          npm init -y > /dev/null
           npm install "$GITHUB_WORKSPACE"/lapointelabs-tripwire-*.tgz
           ./node_modules/.bin/tripwire --version
           ./node_modules/.bin/tripwire engines --no-color
           ./node_modules/.bin/tripwire rules --json > /dev/null
+          ./node_modules/.bin/tripwire benchmark --json > /dev/null
           ./node_modules/.bin/tripwire scan . --no-ai --no-color
 
   publish:
     needs: test
+    # The only push trigger is a version tag, so this is "a tag was pushed". A manual run
+    # can never publish, including one dispatched against a tag ref.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
-      # Required for npm trusted publishing (OIDC). Note that OIDC cannot perform a
-      # package's *first* publish — npm will not register a trusted publisher until the
-      # package exists — so v0.1.0 was published locally and everything after it runs here.
+      # npm trusted publishing. The registry exchanges this OIDC identity token for a
+      # short-lived credential, so there is no NODE_AUTH_TOKEN and no long-lived secret in
+      # this repository to leak or rotate.
+      #
+      # OIDC cannot perform a package's *first* publish — npm will not register a trusted
+      # publisher until the package exists — so v0.1.0 was published by hand.
       id-token: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      # Node 24 LTS bundles npm 11.17, above the 11.5.1 that trusted publishing requires.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      # Trusted publishing needs npm 11.5.1+, newer than the npm bundled with Node 20.
-      #
-      # Pinned to the 11.x line rather than @latest on purpose: npm 12 requires Node
-      # ^22.22 || ^24.15 || >=26, so `npm install -g npm@latest` started failing here the
-      # moment npm 12 shipped. A floating major on a fixed Node is a build that breaks on
-      # someone else's release schedule.
-      - name: Install an npm that supports trusted publishing
-        run: |
-          npm install -g "npm@^11"
-          echo "npm $(npm --version) on node $(node --version)"
-
-      # The pin above can still resolve to something too old if npm ever yanks releases,
-      # and OIDC failing at publish time is the worst moment to find that out.
-      - name: Verify npm supports trusted publishing
-        run: |
-          V="$(npm --version)"
-          node -e '
-            const v = process.argv[1].split(".").map(Number);
-            const ok = v[0] > 11 || (v[0] === 11 && (v[1] > 5 || (v[1] === 5 && v[2] >= 1)));
-            if (!ok) { console.error(`::error::npm ${process.argv[1]} is below the 11.5.1 required for trusted publishing`); process.exit(1); }
-            console.log(`npm ${process.argv[1]} supports trusted publishing`);
-          ' "$V"
-
-      - run: npm ci
-
-      # The tag is the release's claim about what version this is. If it disagrees with
-      # package.json, one of the two is wrong and publishing either would be a lie.
+      # The tag and package.json are two separate claims about which version this is.
+      # Publishing while they disagree ships one of them as a lie.
       - name: Verify the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(node -p 'require("./package.json").version')"
-          SRC="$(node -e 'import("./src/version.js").then(m => console.log(m.VERSION))')"
-          echo "tag=$TAG package.json=$PKG src/version.js=$SRC"
-          test "$TAG" = "$PKG" || { echo "::error::tag v$TAG does not match package.json $PKG"; exit 1; }
-          test "$TAG" = "$SRC" || { echo "::error::tag v$TAG does not match src/version.js $SRC"; exit 1; }
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          test "$tag" = "$pkg" ||
+            { echo "::error::tag v$tag does not match package.json $pkg"; exit 1; }
 
-      - name: Publish
-        if: startsWith(github.ref, 'refs/tags/v') && inputs.dry_run != true
-        # No NODE_AUTH_TOKEN. Authentication is the OIDC token from `id-token: write`
-        # above, exchanged with the registry for a short-lived publish credential. There
-        # is no long-lived secret in this repository to leak or rotate.
-        #
-        # `npm publish` applies the `latest` dist-tag unless told otherwise — including
-        # for prereleases. Without this, tagging v0.2.0-rc.1 would serve a release
-        # candidate to everyone running `npx @lapointelabs/tripwire`.
-        run: |
-          VER="$(node -p 'require("./package.json").version')"
-          case "$VER" in
-            *-*) TAG="next" ;;
-            *)   TAG="latest" ;;
-          esac
-          echo "publishing $VER under dist-tag $TAG"
-          npm publish --tag "$TAG"
-
-      # A repeatable smoke test, which means it must not fail merely because the version in
-      # package.json is already on the registry — after any release, it always is.
+      # Deliberately no `npm ci`: nothing here builds, and `files` ships only bin/ and
+      # src/, so the one job holding a publish credential installs no third-party code.
       #
-      # That check is worth keeping rather than suppressing, though: discovering that the
-      # version you are about to tag was already published is exactly what you want to
-      # learn here, and not from a failed release job.
-      - name: Publish dry run
-        if: "!startsWith(github.ref, 'refs/tags/v') || inputs.dry_run == true"
+      # `--provenance` attaches a signed Sigstore attestation binding this tarball to this
+      # workflow run and commit, so consumers can verify where it was built.
+      #
+      # npm applies the `latest` dist-tag unless told otherwise, including for
+      # prereleases. Without the case below, tagging v0.2.0-rc.1 would serve a release
+      # candidate to everyone running `npx @lapointelabs/tripwire`.
+      - name: Publish
         run: |
-          NAME="$(node -p 'require("./package.json").name')"
-          VER="$(node -p 'require("./package.json").version')"
-          CODE="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${NAME/\//%2f}/$VER")"
-
-          if [ "$CODE" = "200" ]; then
-            echo "::notice::$NAME@$VER is already published — skipping the dry run. Bump the version before tagging a release."
-            npm pack --ignore-scripts >/dev/null
-            echo "Tarball still builds cleanly:"
-            ls -la lapointelabs-tripwire-*.tgz
-          else
-            npm publish --dry-run
-          fi
-
-          echo "::warning::A dry run does not exercise OIDC authentication — npm only exchanges the identity token on a real publish. The first tag push is the real test of trusted publishing."
+          version="$(node -p 'require("./package.json").version')"
+          case "$version" in
+            *-*) tag=next ;;
+            *)   tag=latest ;;
+          esac
+          echo "publishing $version under dist-tag $tag"
+          npm publish --provenance --tag "$tag"

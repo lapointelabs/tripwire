@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">Tripwire benchmark report</title>
+  <desc id="desc">The bundled seeded corpus reports 100 percent precision, recall, and F1 across 14 expected detections, with zero unexpected or missed findings.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#151811"/><stop offset="1" stop-color="#0d100b"/></linearGradient>
+  </defs>
+  <rect width="1200" height="430" rx="18" fill="url(#bg)"/>
+  <g transform="translate(52 45)" font-family="ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+    <text fill="#8f9488" font-size="10" font-weight="700" letter-spacing="1.6">TRIPWIRE BENCHMARK</text>
+    <text y="33" fill="#f2f4ed" font-size="25" font-weight="700">Seeded security corpus</text>
+    <text y="57" fill="#a9ada3" font-size="12">Deterministic risky and safe counterparts · corpus v1.0.0</text>
+
+    <g transform="translate(0 84)">
+      <g><rect width="260" height="83" rx="13" fill="#1b2017" stroke="#fff" stroke-opacity=".09"/><text x="18" y="26" fill="#949a8e" font-size="11">Precision</text><text x="18" y="61" fill="#76d394" font-size="29" font-weight="700">100%</text></g>
+      <g transform="translate(278)"><rect width="260" height="83" rx="13" fill="#1b2017" stroke="#fff" stroke-opacity=".09"/><text x="18" y="26" fill="#949a8e" font-size="11">Recall</text><text x="18" y="61" fill="#76d394" font-size="29" font-weight="700">100%</text></g>
+      <g transform="translate(556)"><rect width="260" height="83" rx="13" fill="#1b2017" stroke="#fff" stroke-opacity=".09"/><text x="18" y="26" fill="#949a8e" font-size="11">F1</text><text x="18" y="61" fill="#76d394" font-size="29" font-weight="700">100%</text></g>
+      <g transform="translate(834)"><rect width="260" height="83" rx="13" fill="#1b2017" stroke="#fff" stroke-opacity=".09"/><text x="18" y="26" fill="#949a8e" font-size="11">Unexpected / missed</text><text x="18" y="61" fill="#f2f4ed" font-size="29" font-weight="700">0 / 0</text></g>
+    </g>
+
+    <g transform="translate(0 191)">
+      <rect width="1094" height="120" rx="13" fill="#1b2017" stroke="#fff" stroke-opacity=".09"/>
+      <text x="18" y="27" fill="#f2f4ed" font-size="13" font-weight="700">Rule recall</text>
+      <g transform="translate(18 47)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="10">
+        <text y="12" fill="#a9ada3">SQL interpolation</text><rect x="144" y="4" width="296" height="8" rx="4" fill="#2a3026"/><rect x="144" y="4" width="296" height="8" rx="4" fill="#76d394"/><text x="457" y="12" fill="#dce1d7">2/2</text>
+        <text x="544" y="12" fill="#a9ada3">Agent safety</text><rect x="663" y="4" width="296" height="8" rx="4" fill="#2a3026"/><rect x="663" y="4" width="296" height="8" rx="4" fill="#76d394"/><text x="976" y="12" fill="#dce1d7">4/4</text>
+        <text y="45" fill="#a9ada3">Command execution</text><rect x="144" y="37" width="296" height="8" rx="4" fill="#2a3026"/><rect x="144" y="37" width="296" height="8" rx="4" fill="#76d394"/><text x="457" y="45" fill="#dce1d7">1/1</text>
+        <text x="544" y="45" fill="#a9ada3">Web security</text><rect x="663" y="37" width="296" height="8" rx="4" fill="#2a3026"/><rect x="663" y="37" width="296" height="8" rx="4" fill="#76d394"/><text x="976" y="45" fill="#dce1d7">3/3</text>
+      </g>
+    </g>
+
+    <text x="0" y="337" fill="#8f9488" font-size="10">14 expected detections · project-maintained regression corpus · not an independent scanner comparison</text>
+    <text x="1094" y="337" text-anchor="end" fill="#76d394" font-size="11" font-weight="700">CI GATE PASSED</text>
+  </g>
+</svg>

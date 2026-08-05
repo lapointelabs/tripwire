@@ -1,0 +1,12 @@
+version: 2
+
+# Actions in the release workflow are pinned to commit SHAs, which is the only pin a
+# mutable tag cannot be moved out from under. A pinned SHA never updates on its own, so
+# this is what keeps the pins from silently rotting into unpatched versions.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

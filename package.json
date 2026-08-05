@@ -10,15 +10,20 @@
     ".": "./src/index.js"
   },
   "files": [
+    "benchmark",
     "bin",
+    "docs",
+    "schemas",
     "src",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check bin/tripwire.js",
-    "release:check": "npm test && npm publish --dry-run --ignore-scripts"
+    "check": "node scripts/check-syntax.js",
+    "benchmark": "node bin/tripwire.js benchmark",
+    "benchmark:ci": "node bin/tripwire.js benchmark --no-color --min-precision 1 --min-recall 1",
+    "release:check": "npm test && npm pack --ignore-scripts"
   },
   "engines": {
     "node": ">=20.1"
